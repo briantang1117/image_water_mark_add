@@ -3,7 +3,9 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>DJI 水印叠加工具</title>
+    <title>DJI 水印叠加工具 - 批量版</title>
+    <!-- JSZip 用于打包下载多张图片 -->
+    <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
     <style>
         * { box-sizing: border-box; }
         body {
@@ -13,7 +15,7 @@
             background: #f5f5f5;
         }
         .container {
-            max-width: 900px;
+            max-width: 1200px;
             margin: 0 auto;
             background: #fff;
             padding: 24px;
@@ -68,6 +70,106 @@
             color: #333;
         }
         button.secondary:hover { background: #e0e0e0; }
+        button.danger {
+            background: #ff3b30;
+        }
+        button.danger:hover { background: #d70015; }
+        button:disabled {
+            background: #c0c0c0;
+            cursor: not-allowed;
+        }
+
+        /* 主体两栏布局：左缩略图列表，右预览+参数 */
+        .main-layout {
+            display: flex;
+            gap: 20px;
+            margin-top: 16px;
+            align-items: flex-start;
+        }
+
+        /* 缩略图列表 */
+        .thumb-panel {
+            width: 200px;
+            flex-shrink: 0;
+            border: 1px solid #eee;
+            border-radius: 8px;
+            padding: 10px;
+            background: #fafafa;
+            max-height: 70vh;
+            overflow-y: auto;
+        }
+        .thumb-panel h4 {
+            margin: 0 0 10px 0;
+            font-size: 13px;
+            color: #555;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .thumb-count {
+            background: #007aff;
+            color: #fff;
+            border-radius: 10px;
+            padding: 1px 8px;
+            font-size: 12px;
+        }
+        .thumb-list {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+        .thumb-item {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 6px;
+            border-radius: 6px;
+            cursor: pointer;
+            border: 2px solid transparent;
+            background: #fff;
+            transition: background 0.15s;
+        }
+        .thumb-item:hover {
+            background: #f0f7ff;
+        }
+        .thumb-item.active {
+            border-color: #007aff;
+            background: #eaf4ff;
+        }
+        .thumb-item img {
+            width: 48px;
+            height: 48px;
+            object-fit: cover;
+            border-radius: 4px;
+            flex-shrink: 0;
+        }
+        .thumb-item .thumb-info {
+            flex: 1;
+            min-width: 0;
+        }
+        .thumb-item .thumb-name {
+            font-size: 12px;
+            color: #333;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+        .thumb-item .thumb-size {
+            font-size: 11px;
+            color: #999;
+        }
+        .thumb-empty {
+            text-align: center;
+            color: #bbb;
+            font-size: 12px;
+            padding: 20px 0;
+        }
+
+        /* 预览区 */
+        .preview-panel {
+            flex: 1;
+            min-width: 0;
+        }
         .canvas-wrap {
             margin-top: 16px;
             text-align: center;
@@ -95,18 +197,25 @@
             margin-top: 8px;
             min-height: 18px;
         }
+        .progress {
+            font-size: 13px;
+            color: #007aff;
+            margin-top: 8px;
+            min-height: 18px;
+        }
     </style>
 </head>
 <body>
     <div class="container">
-        <h2>DJI 水印叠加工具</h2>
+        <h2>DJI 水印叠加工具 <span style="font-size:14px;color:#999;font-weight:normal;">（批量版）</span></h2>
 
         <div class="row">
             <label>
-                选择原图：
-                <input type="file" id="fileInput" accept="image/*" style="display:none;">
-                <button id="pickBtn" class="secondary">选择图片</button>
+                选择图片：
+                <input type="file" id="fileInput" accept="image/*" multiple style="display:none;">
+                <button id="pickBtn" class="secondary">选择多张图片</button>
             </label>
+            <button id="clearBtn" class="secondary">清空列表</button>
         </div>
 
         <div class="row">
@@ -180,15 +289,31 @@
         </div>
 
         <div class="row">
-            <button id="downloadBtn">下载图片</button>
+            <button id="downloadBtn">下载当前图片</button>
+            <button id="downloadAllBtn">下载全部 (ZIP)</button>
             <button id="resetBtn" class="secondary">重置参数</button>
         </div>
 
         <div class="status" id="status"></div>
+        <div class="progress" id="progress"></div>
 
-        <div class="canvas-wrap" id="canvasWrap">
-            <div class="placeholder" id="placeholder">请先选择一张图片</div>
-            <canvas id="canvas" style="display:none;"></canvas>
+        <div class="main-layout">
+            <div class="thumb-panel">
+                <h4>
+                    <span>图片列表</span>
+                    <span class="thumb-count" id="thumbCount">0</span>
+                </h4>
+                <div class="thumb-list" id="thumbList">
+                    <div class="thumb-empty">暂无图片</div>
+                </div>
+            </div>
+
+            <div class="preview-panel">
+                <div class="canvas-wrap" id="canvasWrap">
+                    <div class="placeholder" id="placeholder">请先选择图片</div>
+                    <canvas id="canvas" style="display:none;"></canvas>
+                </div>
+            </div>
         </div>
     </div>
 
@@ -197,9 +322,15 @@
         const ctx = canvas.getContext('2d');
         const placeholder = document.getElementById('placeholder');
         const statusEl = document.getElementById('status');
+        const progressEl = document.getElementById('progress');
+        const thumbList = document.getElementById('thumbList');
+        const thumbCount = document.getElementById('thumbCount');
 
-        let originImg = null;
-        let originFileName = '';
+        // 图片数据列表：{ id, name, img(HTMLImageElement), thumb(dataURL) }
+        let imageList = [];
+        let currentIndex = -1;
+        let nextId = 1;
+
         let watermarks = {};
         let watermarkLoaded = { '16_9': false, '9_16': false };
 
@@ -240,35 +371,134 @@
             document.getElementById(id).addEventListener('change', render);
         });
 
-        // 判断是否运行在原生 app 内（存在 WKWebView 的 messageHandler）
+        // 判断是否运行在原生 app 内
         function isNativeApp() {
             return !!(window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.native);
         }
 
-        // 统一入口：用 dataURL 加载原图并渲染
-        function loadOriginFromDataURL(dataURL, fileName) {
-            originImg = new Image();
-            if (fileName) originFileName = fileName;
-            originImg.onload = () => {
-                canvas.width = originImg.width;
-                canvas.height = originImg.height;
-                placeholder.style.display = 'none';
-                canvas.style.display = 'inline-block';
-                render();
-            };
-            originImg.onerror = () => {
-                statusEl.textContent = '图片加载失败';
-            };
-            originImg.src = dataURL;
+        // 从 file 加载图片，返回 { img, thumbDataURL }
+        function loadImageFromFile(file) {
+            return new Promise((resolve, reject) => {
+                const reader = new FileReader();
+                reader.onload = e => {
+                    const dataURL = e.target.result;
+                    const img = new Image();
+                    img.onload = () => {
+                        // 生成缩略图
+                        const thumbCanvas = document.createElement('canvas');
+                        const tw = 96, th = 96;
+                        thumbCanvas.width = tw;
+                        thumbCanvas.height = th;
+                        const tctx = thumbCanvas.getContext('2d');
+                        // cover 裁剪
+                        const ratio = Math.max(tw / img.width, th / img.height);
+                        const dw = img.width * ratio;
+                        const dh = img.height * ratio;
+                        tctx.drawImage(img, (tw - dw) / 2, (th - dh) / 2, dw, dh);
+                        resolve({
+                            img: img,
+                            thumbDataURL: thumbCanvas.toDataURL('image/jpeg', 0.7),
+                            name: file.name
+                        });
+                    };
+                    img.onerror = reject;
+                    img.src = dataURL;
+                };
+                reader.onerror = reject;
+                reader.readAsDataURL(file);
+            });
         }
 
-        // 原生 app 回调：Swift 选完图片后注入 base64 调用此函数
-        window.__onImagePicked = function (dataURL, fileName) {
-            statusEl.textContent = '';
-            loadOriginFromDataURL(dataURL, fileName);
-        };
+        // 添加多张图片
+        async function addFiles(fileList) {
+            const files = Array.from(fileList).filter(f => f.type.startsWith('image/'));
+            if (!files.length) return;
 
-        // 选择图片按钮：原生环境走 Swift 文件面板，浏览器环境走 <input type=file>
+            statusEl.textContent = `正在加载 ${files.length} 张图片...`;
+            progressEl.textContent = '';
+
+            let loaded = 0;
+            for (const file of files) {
+                try {
+                    const { img, thumbDataURL, name } = await loadImageFromFile(file);
+                    imageList.push({
+                        id: nextId++,
+                        name: name,
+                        img: img,
+                        thumbDataURL: thumbDataURL
+                    });
+                    loaded++;
+                    statusEl.textContent = `正在加载... ${loaded}/${files.length}`;
+                } catch (e) {
+                    console.error('加载失败:', file.name, e);
+                }
+            }
+
+            statusEl.textContent = '';
+            renderThumbList();
+
+            // 如果之前没有选中，默认选中第一张新增的
+            if (currentIndex < 0 && imageList.length > 0) {
+                selectImage(0);
+            }
+        }
+
+        // 渲染缩略图列表
+        function renderThumbList() {
+            thumbCount.textContent = imageList.length;
+
+            if (imageList.length === 0) {
+                thumbList.innerHTML = '<div class="thumb-empty">暂无图片</div>';
+                return;
+            }
+
+            thumbList.innerHTML = '';
+            imageList.forEach((item, idx) => {
+                const div = document.createElement('div');
+                div.className = 'thumb-item' + (idx === currentIndex ? ' active' : '');
+                div.innerHTML = `
+                    <img src="${item.thumbDataURL}" alt="">
+                    <div class="thumb-info">
+                        <div class="thumb-name" title="${item.name}">${item.name}</div>
+                        <div class="thumb-size">${item.img.width} × ${item.img.height}</div>
+                    </div>
+                `;
+                div.addEventListener('click', () => selectImage(idx));
+                thumbList.appendChild(div);
+            });
+        }
+
+        // 选中某张图片
+        function selectImage(index) {
+            if (index < 0 || index >= imageList.length) return;
+            currentIndex = index;
+            const item = imageList[index];
+
+            canvas.width = item.img.width;
+            canvas.height = item.img.height;
+            placeholder.style.display = 'none';
+            canvas.style.display = 'inline-block';
+
+            renderThumbList();
+            render();
+        }
+
+        // 清空列表
+        function clearList() {
+            if (imageList.length === 0) return;
+            if (!confirm(`确定清空 ${imageList.length} 张图片吗？`)) return;
+            imageList = [];
+            currentIndex = -1;
+            canvas.width = 0;
+            canvas.height = 0;
+            canvas.style.display = 'none';
+            placeholder.style.display = 'block';
+            renderThumbList();
+            statusEl.textContent = '';
+            progressEl.textContent = '';
+        }
+
+        // 选择图片按钮
         document.getElementById('pickBtn').addEventListener('click', function () {
             if (isNativeApp()) {
                 window.webkit.messageHandlers.native.postMessage({ action: 'pickImage' });
@@ -277,25 +507,52 @@
             }
         });
 
-        // 浏览器环境：<input type=file> 兜底
+        // 浏览器环境：input[type=file] multiple
         document.getElementById('fileInput').addEventListener('change', function (e) {
-            const file = e.target.files[0];
-            if (!file) return;
-            statusEl.textContent = '';
-            const reader = new FileReader();
-            reader.onload = ev => loadOriginFromDataURL(ev.target.result, file.name);
-            reader.onerror = () => {
-                statusEl.textContent = '文件读取失败';
-            };
-            reader.readAsDataURL(file);
+            if (e.target.files && e.target.files.length) {
+                statusEl.textContent = '';
+                addFiles(e.target.files);
+            }
+            // 允许重复选择同一文件
+            e.target.value = '';
         });
 
-        // 绘制水印（支持 contain / cover / original）
+        // 清空按钮
+        document.getElementById('clearBtn').addEventListener('click', clearList);
+
+        // 原生 app 回调（保留单张兼容）
+        window.__onImagePicked = function (dataURL, fileName) {
+            statusEl.textContent = '';
+            const img = new Image();
+            img.onload = () => {
+                // 生成缩略图
+                const thumbCanvas = document.createElement('canvas');
+                const tw = 96, th = 96;
+                thumbCanvas.width = tw;
+                thumbCanvas.height = th;
+                const tctx = thumbCanvas.getContext('2d');
+                const ratio = Math.max(tw / img.width, th / img.height);
+                const dw = img.width * ratio;
+                const dh = img.height * ratio;
+                tctx.drawImage(img, (tw - dw) / 2, (th - dh) / 2, dw, dh);
+
+                imageList.push({
+                    id: nextId++,
+                    name: fileName || 'image.jpg',
+                    img: img,
+                    thumbDataURL: thumbCanvas.toDataURL('image/jpeg', 0.7)
+                });
+                renderThumbList();
+                if (currentIndex < 0) selectImage(0);
+            };
+            img.src = dataURL;
+        };
+
+        // 绘制水印
         function drawWatermark(ctx, img, canvasW, canvasH, fit, scale, posX, posY) {
             let renderW, renderH, offsetX, offsetY;
 
             if (fit === 'original') {
-                // 原始尺寸，按 scale 缩放
                 renderW = img.width * scale / 100;
                 renderH = img.height * scale / 100;
                 offsetX = (canvasW - renderW) * posX / 100;
@@ -322,7 +579,6 @@
                     }
                 }
 
-                // 应用 scale
                 renderW = renderW * scale / 100;
                 renderH = renderH * scale / 100;
                 offsetX = (canvasW - renderW) * posX / 100;
@@ -332,43 +588,205 @@
             ctx.drawImage(img, offsetX, offsetY, renderW, renderH);
         }
 
-        // 主渲染函数
-        function render() {
-            if (!originImg) return;
+        // 获取当前渲染参数
+        function getRenderParams() {
+            return {
+                wmKey: document.getElementById('watermarkSelect').value,
+                blendMode: document.getElementById('blendMode').value,
+                fitMode: document.getElementById('fitMode').value,
+                opacity: document.getElementById('opacity').value / 100,
+                scale: document.getElementById('scale').value,
+                posX: document.getElementById('posX').value,
+                posY: document.getElementById('posY').value
+            };
+        }
 
-            const wmKey = document.getElementById('watermarkSelect').value;
-            const watermarkImg = watermarks[wmKey];
+        // 主渲染函数（渲染当前选中图到 canvas）
+        function render() {
+            if (currentIndex < 0 || !imageList[currentIndex]) return;
+
+            const item = imageList[currentIndex];
+            const params = getRenderParams();
+            const watermarkImg = watermarks[params.wmKey];
             if (!watermarkImg) {
                 statusEl.textContent = '水印图片加载中...';
                 return;
             }
 
-            const blendMode = document.getElementById('blendMode').value;
-            const fitMode = document.getElementById('fitMode').value;
-            const opacity = document.getElementById('opacity').value / 100;
-            const scale = document.getElementById('scale').value;
-            const posX = document.getElementById('posX').value;
-            const posY = document.getElementById('posY').value;
-
-            // 清空并绘制原图
             ctx.clearRect(0, 0, canvas.width, canvas.height);
-            ctx.drawImage(originImg, 0, 0);
+            ctx.drawImage(item.img, 0, 0);
 
-            // 设置水印样式
-            ctx.globalCompositeOperation = blendMode;
-            ctx.globalAlpha = opacity;
+            ctx.globalCompositeOperation = params.blendMode;
+            ctx.globalAlpha = params.opacity;
             ctx.imageSmoothingEnabled = true;
             ctx.imageSmoothingQuality = 'high';
 
-            // 绘制水印
-            drawWatermark(ctx, watermarkImg, canvas.width, canvas.height, fitMode, scale, posX, posY);
+            drawWatermark(ctx, watermarkImg, canvas.width, canvas.height,
+                params.fitMode, params.scale, params.posX, params.posY);
 
-            // 重置
             ctx.globalCompositeOperation = 'source-over';
             ctx.globalAlpha = 1;
         }
 
-        // 质量控件：滑块与手动输入双向联动
+        // 将指定图片加上水印后导出为 dataURL
+        function exportImageDataURL(img) {
+            const params = getRenderParams();
+            const watermarkImg = watermarks[params.wmKey];
+            if (!watermarkImg) throw new Error('水印未加载');
+
+            const exportCanvas = document.createElement('canvas');
+            exportCanvas.width = img.width;
+            exportCanvas.height = img.height;
+            const ectx = exportCanvas.getContext('2d');
+
+            const format = document.getElementById('formatSelect').value;
+            const quality = qualitySlider.value / 100;
+
+            if (format === 'jpeg') {
+                // JPG: 铺白底
+                ectx.fillStyle = '#ffffff';
+                ectx.fillRect(0, 0, exportCanvas.width, exportCanvas.height);
+            }
+
+            ectx.drawImage(img, 0, 0);
+
+            ectx.globalCompositeOperation = params.blendMode;
+            ectx.globalAlpha = params.opacity;
+            ectx.imageSmoothingEnabled = true;
+            ectx.imageSmoothingQuality = 'high';
+
+            drawWatermark(ectx, watermarkImg, exportCanvas.width, exportCanvas.height,
+                params.fitMode, params.scale, params.posX, params.posY);
+
+            ectx.globalCompositeOperation = 'source-over';
+            ectx.globalAlpha = 1;
+
+            if (format === 'png') {
+                return { dataURL: exportCanvas.toDataURL('image/png'), ext: 'png' };
+            } else {
+                return { dataURL: exportCanvas.toDataURL('image/jpeg', quality), ext: 'jpg' };
+            }
+        }
+
+        // 生成输出文件名
+        function makeOutputName(originName, ext) {
+            if (originName) {
+                const dotIdx = originName.lastIndexOf('.');
+                const base = dotIdx > 0 ? originName.slice(0, dotIdx) : originName;
+                return base + '_wm.' + ext;
+            }
+            return 'dji-watermark.' + ext;
+        }
+
+        // dataURL 转 Blob
+        function dataURLtoBlob(dataURL) {
+            const arr = dataURL.split(',');
+            const mime = arr[0].match(/:(.*?);/)[1];
+            const bstr = atob(arr[1]);
+            let n = bstr.length;
+            const u8arr = new Uint8Array(n);
+            while (n--) {
+                u8arr[n] = bstr.charCodeAt(n);
+            }
+            return new Blob([u8arr], { type: mime });
+        }
+
+        // 下载当前图片
+        document.getElementById('downloadBtn').addEventListener('click', function () {
+            if (currentIndex < 0) {
+                alert('请先上传并选中一张图片');
+                return;
+            }
+
+            const item = imageList[currentIndex];
+            const { dataURL, ext } = exportImageDataURL(item.img);
+            const outName = makeOutputName(item.name, ext);
+
+            if (isNativeApp()) {
+                window.webkit.messageHandlers.native.postMessage({
+                    action: 'saveImage',
+                    dataURL: dataURL,
+                    filename: outName
+                });
+            } else {
+                const link = document.createElement('a');
+                link.download = outName;
+                link.href = dataURL;
+                link.click();
+            }
+        });
+
+        // 下载全部（ZIP）
+        document.getElementById('downloadAllBtn').addEventListener('click', async function () {
+            if (imageList.length === 0) {
+                alert('请先上传图片');
+                return;
+            }
+
+            if (typeof JSZip === 'undefined') {
+                alert('ZIP 库加载失败，请检查网络连接');
+                return;
+            }
+
+            const btn = this;
+            btn.disabled = true;
+            const originalText = btn.textContent;
+            btn.textContent = '处理中...';
+
+            try {
+                const zip = new JSZip();
+                const total = imageList.length;
+
+                for (let i = 0; i < total; i++) {
+                    const item = imageList[i];
+                    progressEl.textContent = `正在处理 ${i + 1}/${total}：${item.name}`;
+
+                    const { dataURL, ext } = exportImageDataURL(item.img);
+                    const outName = makeOutputName(item.name, ext);
+                    const blob = dataURLtoBlob(dataURL);
+                    zip.file(outName, blob);
+
+                    // 让 UI 有机会更新
+                    await new Promise(r => setTimeout(r, 0));
+                }
+
+                progressEl.textContent = '正在生成 ZIP 文件...';
+                const zipBlob = await zip.generateAsync({ type: 'blob' }, (metadata) => {
+                    progressEl.textContent = `正在生成 ZIP 文件... ${metadata.percent.toFixed(1)}%`;
+                });
+
+                const zipName = 'dji-watermark-batch.zip';
+                if (isNativeApp()) {
+                    // 原生环境：将 zip 转为 base64 交给原生
+                    const reader = new FileReader();
+                    reader.onload = () => {
+                        window.webkit.messageHandlers.native.postMessage({
+                            action: 'saveImage',
+                            dataURL: reader.result,
+                            filename: zipName
+                        });
+                    };
+                    reader.readAsDataURL(zipBlob);
+                } else {
+                    const url = URL.createObjectURL(zipBlob);
+                    const link = document.createElement('a');
+                    link.href = url;
+                    link.download = zipName;
+                    link.click();
+                    setTimeout(() => URL.revokeObjectURL(url), 1000);
+                }
+
+                progressEl.textContent = `✅ 已打包 ${total} 张图片`;
+            } catch (e) {
+                console.error(e);
+                statusEl.textContent = '批量导出失败：' + e.message;
+            } finally {
+                btn.disabled = false;
+                btn.textContent = originalText;
+            }
+        });
+
+        // 质量控件
         const qualitySlider = document.getElementById('quality');
         const qualityNum = document.getElementById('qualityNum');
         const qualityVal = document.getElementById('qualityVal');
@@ -390,65 +808,10 @@
             qualityVal.textContent = v + '%';
         });
 
-        // 切换格式：JPG 才需要质量参数，PNG 无损无需质量
         document.getElementById('formatSelect').addEventListener('change', () => {
             const isJpeg = document.getElementById('formatSelect').value === 'jpeg';
             qualitySlider.disabled = !isJpeg;
             qualityNum.disabled = !isJpeg;
-        });
-
-        // 下载
-        document.getElementById('downloadBtn').addEventListener('click', function () {
-            if (!originImg) {
-                alert('请先上传图片');
-                return;
-            }
-
-            const format = document.getElementById('formatSelect').value;
-            const quality = qualitySlider.value / 100;
-
-            let dataURL, ext;
-            if (format === 'png') {
-                // PNG 无损，保留透明通道，无需白底
-                dataURL = canvas.toDataURL('image/png');
-                ext = 'png';
-            } else {
-                // JPG 不支持透明通道，先铺白底避免透明区域导出后变黑
-                const exportCanvas = document.createElement('canvas');
-                exportCanvas.width = canvas.width;
-                exportCanvas.height = canvas.height;
-                const ectx = exportCanvas.getContext('2d');
-                ectx.fillStyle = '#ffffff';
-                ectx.fillRect(0, 0, exportCanvas.width, exportCanvas.height);
-                ectx.drawImage(canvas, 0, 0);
-                dataURL = exportCanvas.toDataURL('image/jpeg', quality);
-                ext = 'jpg';
-            }
-
-            // 生成输出文件名：输入文件名 + _wm 后缀
-            let outName;
-            if (originFileName) {
-                const dotIdx = originFileName.lastIndexOf('.');
-                const base = dotIdx > 0 ? originFileName.slice(0, dotIdx) : originFileName;
-                outName = base + '_wm.' + ext;
-            } else {
-                outName = 'dji-watermark.' + ext;
-            }
-
-            if (isNativeApp()) {
-                // 原生环境：交给 Swift 用 NSSavePanel 保存
-                window.webkit.messageHandlers.native.postMessage({
-                    action: 'saveImage',
-                    dataURL: dataURL,
-                    filename: outName
-                });
-            } else {
-                // 浏览器环境：a[download] 触发下载
-                const link = document.createElement('a');
-                link.download = outName;
-                link.href = dataURL;
-                link.click();
-            }
         });
 
         // 重置

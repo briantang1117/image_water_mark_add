@@ -220,10 +220,12 @@
 
         <div class="row">
             <label>
-                水印方向：
+                水印：
                 <select id="watermarkSelect">
-                    <option value="16_9">横屏水印 (16:9)</option>
-                    <option value="9_16">竖屏水印 (9:16)</option>
+                    <option value="op4p_horizontal">大疆OP4P横屏</option>
+                    <option value="op4p_vertical">大疆OP4P竖屏</option>
+                    <option value="a7c_horizontal">索尼A7C横屏</option>
+                    <option value="a7c_vertical">索尼A7C竖屏</option>
                 </select>
             </label>
             <label>
@@ -332,7 +334,7 @@
         let nextId = 1;
 
         let watermarks = {};
-        let watermarkLoaded = { '16_9': false, '9_16': false };
+        let watermarkLoaded = { 'op4p_horizontal': false, 'op4p_vertical': false, 'a7c_horizontal': false, 'a7c_vertical': false };
 
         // 预加载水印
         function loadWatermark(key, src) {
@@ -352,8 +354,10 @@
             });
         }
 
-        loadWatermark('16_9', './assets/water_16_9.png').catch(() => {});
-        loadWatermark('9_16', './assets/water_9_16.png').catch(() => {});
+        loadWatermark('op4p_horizontal', './assets/op4p_horizontal.png').catch(() => {});
+        loadWatermark('op4p_vertical', './assets/op4p_vertical.png').catch(() => {});
+        loadWatermark('a7c_horizontal', './assets/a7c_horizontal.png').catch(() => {});
+        loadWatermark('a7c_vertical', './assets/a7c_vertical.png').catch(() => {});
 
         // 滑块值显示
         const sliders = ['opacity', 'scale', 'posX', 'posY'];

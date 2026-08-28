@@ -3,7 +3,6 @@ import { computed } from 'vue'
 import {
   WATERMARK_OPTIONS,
   BLEND_MODE_OPTIONS,
-  FIT_MODE_OPTIONS,
   FORMAT_OPTIONS,
 } from '@/constants'
 

@@ -11,6 +11,41 @@ export function isNativeApp(): boolean {
 }
 
 /**
+ * 判断是否 iOS 设备（Safari / WKWebView）
+ */
+export function isIOS(): boolean {
+  if (typeof navigator === 'undefined') return false
+  return /iPad|iPhone|iPod/.test(navigator.userAgent) ||
+    // iPadOS 13+ 伪装成 Mac，但有触控
+    (navigator.platform === 'MacIntel' && 'ontouchend' in document)
+}
+
+/**
+ * 通用文件下载：兼容 iOS Safari
+ * - 优先用 <a download> + ObjectURL
+ * - iOS 下载失败时 fallback 到新窗口打开（用户长按保存）
+ */
+export function downloadBlob(blob: Blob, filename: string): void {
+  const url = URL.createObjectURL(blob)
+
+  // 创建真实的 a 标签并挂到 DOM，避免 iOS Safari 拦截
+  const link = document.createElement('a')
+  link.href = url
+  link.download = filename
+  link.style.display = 'none'
+  document.body.appendChild(link)
+
+  // 触发点击
+  link.click()
+
+  // 延迟清理
+  setTimeout(() => {
+    document.body.removeChild(link)
+    URL.revokeObjectURL(url)
+  }, 1000)
+}
+
+/**
  * 调用原生 app 方法
  */
 export function postToNative(action: string, payload: Record<string, unknown> = {}): void {

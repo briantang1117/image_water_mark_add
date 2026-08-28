@@ -5,7 +5,7 @@ import ThumbPanel from '@/components/ThumbPanel.vue'
 import PreviewPanel from '@/components/PreviewPanel.vue'
 import ControlToolbar from '@/components/ControlToolbar.vue'
 import { useWatermark } from '@/composables/useWatermark'
-import { isNativeApp, postToNative, makeOutputName, dataURLtoBlob } from '@/utils'
+import { isNativeApp, isIOS, postToNative, makeOutputName, dataURLtoBlob, downloadBlob } from '@/utils'
 
 const {
   imageList,
@@ -98,11 +98,18 @@ function handleDownload(): void {
 
   if (isNativeApp()) {
     postToNative('saveImage', { dataURL, filename: outName })
-  } else {
-    const link = document.createElement('a')
-    link.download = outName
-    link.href = dataURL
-    link.click()
+    return
+  }
+
+  // 浏览器环境：用 Blob + ObjectURL 下载，兼容 iOS
+  const blob = dataURLtoBlob(dataURL)
+  downloadBlob(blob, outName)
+
+  // iOS 提示用户长按保存
+  if (isIOS()) {
+    setTimeout(() => {
+      alert('如果没有自动保存，请长按图片选择「添加到照片」')
+    }, 500)
   }
 }
 
@@ -146,12 +153,8 @@ async function handleDownloadAll(): Promise<void> {
       }
       reader.readAsDataURL(zipBlob)
     } else {
-      const url = URL.createObjectURL(zipBlob)
-      const link = document.createElement('a')
-      link.href = url
-      link.download = zipName
-      link.click()
-      setTimeout(() => URL.revokeObjectURL(url), 1000)
+      // 浏览器环境：用统一的 downloadBlob，兼容 iOS
+      downloadBlob(zipBlob, zipName)
     }
 
     progress.value = `✅ 已打包 ${total} 张图片`

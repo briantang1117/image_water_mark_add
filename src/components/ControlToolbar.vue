@@ -1,7 +1,7 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, ref, watch } from 'vue'
 import {
-  WATERMARK_OPTIONS,
+  BRANDS,
   BLEND_MODE_OPTIONS,
   FORMAT_OPTIONS,
 } from '@/constants'
@@ -30,8 +30,44 @@ const emit = defineEmits<{
   reset: []
 }>()
 
+// 从 wmKey 解析品牌 key
+function extractBrandKey(wmKey: string): string {
+  return wmKey.split('/')[0] ?? ''
+}
+
+// 当前选中的品牌 key（与 params.wmKey 双向同步）
+const currentBrandKey = ref(extractBrandKey(props.params.wmKey))
+
+// 监听外部 wmKey 变化，同步品牌
+watch(
+  () => props.params.wmKey,
+  (newKey) => {
+    const brand = extractBrandKey(newKey)
+    if (brand && brand !== currentBrandKey.value) {
+      currentBrandKey.value = brand
+    }
+  },
+)
+
+// 当前品牌下的水印列表
+const currentBrandWatermarks = computed(() => {
+  const brand = BRANDS.find((b) => b.key === currentBrandKey.value)
+  return brand?.watermarks ?? []
+})
+
 function updateParam(key: string, value: unknown): void {
   emit('update:params', { [key]: value })
+}
+
+// 切换品牌
+function handleBrandChange(e: Event): void {
+  const brandKey = (e.target as HTMLSelectElement).value
+  currentBrandKey.value = brandKey
+  // 自动选中该品牌的第一个水印
+  const brand = BRANDS.find((b) => b.key === brandKey)
+  if (brand && brand.watermarks.length > 0) {
+    updateParam('wmKey', brand.watermarks[0].value)
+  }
 }
 
 const isJpeg = computed(() => props.params.format === 'jpeg')
@@ -49,12 +85,24 @@ const isJpeg = computed(() => props.params.format === 'jpeg')
 
     <div class="row">
       <label>
+        品牌：
+        <select :value="currentBrandKey" @change="handleBrandChange">
+          <option v-for="brand in BRANDS" :key="brand.key" :value="brand.key">
+            {{ brand.label }}
+          </option>
+        </select>
+      </label>
+      <label>
         水印：
         <select
           :value="params.wmKey"
           @change="updateParam('wmKey', ($event.target as HTMLSelectElement).value)"
         >
-          <option v-for="opt in WATERMARK_OPTIONS" :key="opt.value" :value="opt.value">
+          <option
+            v-for="opt in currentBrandWatermarks"
+            :key="opt.value"
+            :value="opt.value"
+          >
             {{ opt.label }}
           </option>
         </select>

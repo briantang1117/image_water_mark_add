@@ -1,6 +1,6 @@
-// 动态读取 src/assets 下所有 PNG 图片作为水印选项
-// 新增水印只需将 PNG 放入 src/assets 目录，无需修改代码
-const watermarkModules = import.meta.glob('@/assets/*.png', {
+// 动态读取 src/assets/<brand>/*.png 下所有 PNG 图片作为水印选项
+// 新增品牌/水印只需在 src/assets 下新建品牌文件夹并放入 PNG，无需修改代码
+const watermarkModules = import.meta.glob('@/assets/*/*.png', {
   eager: true,
   query: '?url',
   import: 'default',
@@ -12,19 +12,61 @@ export interface WatermarkOption {
   src: string
 }
 
-// 从文件名提取 value 和 label（去掉后缀）
-function parseFileName(path: string): { value: string; label: string } {
-  const fileName = path.split('/').pop() || path
-  const name = fileName.replace(/\.[^.]+$/, '')
-  return { value: name, label: name }
+export interface Brand {
+  key: string
+  label: string
+  watermarks: WatermarkOption[]
 }
 
-export const WATERMARK_OPTIONS: WatermarkOption[] = Object.entries(watermarkModules)
-  .map(([path, src]) => ({
-    ...parseFileName(path),
+// 从路径中解析品牌和文件名
+// 路径格式：/src/assets/<brand>/<name>.png
+function parsePath(path: string): { brandKey: string; fileName: string; label: string } {
+  const parts = path.split('/')
+  const fileName = (parts.pop() || path).replace(/\.[^.]+$/, '')
+  const brandKey = parts.pop() || 'unknown'
+  return { brandKey, fileName, label: fileName }
+}
+
+// 品牌显示名（首字母大写，其余保持原样）
+function formatBrandLabel(key: string): string {
+  if (!key) return key
+  return key.charAt(0).toUpperCase() + key.slice(1)
+}
+
+// 构建品牌列表
+const brandMap = new Map<string, Brand>()
+
+Object.entries(watermarkModules).forEach(([path, src]) => {
+  const { brandKey, fileName, label } = parsePath(path)
+  const wmValue = `${brandKey}/${fileName}`
+
+  if (!brandMap.has(brandKey)) {
+    brandMap.set(brandKey, {
+      key: brandKey,
+      label: formatBrandLabel(brandKey),
+      watermarks: [],
+    })
+  }
+
+  brandMap.get(brandKey)!.watermarks.push({
+    value: wmValue,
+    label,
     src,
+  })
+})
+
+// 品牌按名称排序，每个品牌下的水印也按名称排序
+export const BRANDS: Brand[] = Array.from(brandMap.values())
+  .sort((a, b) => a.key.localeCompare(b.key))
+  .map((brand) => ({
+    ...brand,
+    watermarks: brand.watermarks.sort((a, b) => a.value.localeCompare(b.value)),
   }))
-  .sort((a, b) => a.value.localeCompare(b.value))
+
+// 打平的水印列表（兼容旧代码）
+export const WATERMARK_OPTIONS: WatermarkOption[] = BRANDS.flatMap(
+  (brand) => brand.watermarks,
+)
 
 // 水印 key -> src 的映射表
 export const WATERMARK_SOURCES: Record<string, string> = WATERMARK_OPTIONS.reduce(
@@ -35,8 +77,10 @@ export const WATERMARK_SOURCES: Record<string, string> = WATERMARK_OPTIONS.reduc
   {} as Record<string, string>,
 )
 
-// 默认水印 key（取第一个）
-export const DEFAULT_WATERMARK_KEY = WATERMARK_OPTIONS[0]?.value ?? 'op4p_horizontal'
+// 默认品牌和水印 key（取第一个品牌的第一个水印）
+export const DEFAULT_BRAND_KEY = BRANDS[0]?.key ?? 'dji'
+export const DEFAULT_WATERMARK_KEY =
+  BRANDS[0]?.watermarks[0]?.value ?? 'dji/DJI-OP4P-横屏'
 
 export const BLEND_MODE_OPTIONS: Array<{ value: string; label: string }> = [
   { value: 'screen', label: 'Screen 滤色（黑底水印推荐）' },

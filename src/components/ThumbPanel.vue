@@ -8,17 +8,23 @@ defineProps<{
 
 const emit = defineEmits<{
   select: [index: number]
+  remove: [index: number]
 }>()
+
+function handleRemove(e: Event, index: number): void {
+  e.stopPropagation()
+  emit('remove', index)
+}
 </script>
 
 <template>
   <div class="thumb-panel">
-    <h4>
-      <span>图片列表</span>
+    <div class="thumb-header">
+      <span class="thumb-title">图片列表</span>
       <span class="thumb-count">{{ imageList.length }}</span>
-    </h4>
-    <div class="thumb-list">
-      <div v-if="imageList.length === 0" class="thumb-empty">暂无图片</div>
+    </div>
+    <div v-if="imageList.length === 0" class="thumb-empty">暂无图片</div>
+    <div v-else class="thumb-list">
       <div
         v-for="(item, index) in imageList"
         :key="item.id"
@@ -27,10 +33,9 @@ const emit = defineEmits<{
         @click="emit('select', index)"
       >
         <img :src="item.thumbDataURL" alt="" />
-        <div class="thumb-info">
-          <div class="thumb-name" :title="item.name">{{ item.name }}</div>
-          <div class="thumb-size">{{ item.img.width }} × {{ item.img.height }}</div>
-        </div>
+        <button class="thumb-remove" @click="handleRemove($event, index)" title="删除">
+          ×
+        </button>
       </div>
     </div>
   </div>
@@ -38,23 +43,24 @@ const emit = defineEmits<{
 
 <style scoped>
 .thumb-panel {
-  width: 200px;
+  width: 100%;
   flex-shrink: 0;
-  border: 1px solid #eee;
+  background: #f8f8f8;
   border-radius: 8px;
-  padding: 10px;
-  background: #fafafa;
-  max-height: 70vh;
-  overflow-y: auto;
+  padding: 6px 10px;
 }
 
-.thumb-panel h4 {
-  margin: 0 0 10px 0;
-  font-size: 13px;
-  color: #555;
+.thumb-header {
   display: flex;
-  justify-content: space-between;
   align-items: center;
+  justify-content: space-between;
+  margin-bottom: 6px;
+}
+
+.thumb-title {
+  font-size: 12px;
+  color: #666;
+  font-weight: 500;
 }
 
 .thumb-count {
@@ -62,66 +68,90 @@ const emit = defineEmits<{
   color: #fff;
   border-radius: 10px;
   padding: 1px 8px;
-  font-size: 12px;
+  font-size: 11px;
 }
 
 .thumb-list {
   display: flex;
-  flex-direction: column;
+  flex-direction: row;
   gap: 8px;
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding-bottom: 4px;
+  -webkit-overflow-scrolling: touch;
+}
+
+.thumb-list::-webkit-scrollbar {
+  height: 4px;
+}
+
+.thumb-list::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.thumb-list::-webkit-scrollbar-thumb {
+  background: #ccc;
+  border-radius: 2px;
 }
 
 .thumb-item {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 6px;
+  position: relative;
+  flex-shrink: 0;
+  width: 60px;
+  height: 60px;
   border-radius: 6px;
+  overflow: hidden;
   cursor: pointer;
   border: 2px solid transparent;
   background: #fff;
-  transition: background 0.15s;
-}
-
-.thumb-item:hover {
-  background: #f0f7ff;
+  transition: border-color 0.15s;
 }
 
 .thumb-item.active {
   border-color: #007aff;
-  background: #eaf4ff;
 }
 
 .thumb-item img {
-  width: 48px;
-  height: 48px;
+  width: 100%;
+  height: 100%;
   object-fit: cover;
-  border-radius: 4px;
-  flex-shrink: 0;
+  display: block;
 }
 
-.thumb-item .thumb-info {
-  flex: 1;
-  min-width: 0;
+.thumb-remove {
+  position: absolute;
+  top: 0;
+  right: 0;
+  width: 16px;
+  height: 16px;
+  padding: 0;
+  border: none;
+  border-radius: 0 0 0 4px;
+  background: rgba(0, 0, 0, 0.6);
+  color: #fff;
+  font-size: 14px;
+  line-height: 16px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  opacity: 0;
+  transition: opacity 0.15s;
 }
 
-.thumb-item .thumb-name {
-  font-size: 12px;
-  color: #333;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+.thumb-item:hover .thumb-remove,
+.thumb-item.active .thumb-remove {
+  opacity: 1;
 }
 
-.thumb-item .thumb-size {
-  font-size: 11px;
-  color: #999;
+.thumb-remove:hover {
+  background: #ff3b30;
 }
 
 .thumb-empty {
   text-align: center;
   color: #bbb;
   font-size: 12px;
-  padding: 20px 0;
+  padding: 16px 0;
 }
 </style>

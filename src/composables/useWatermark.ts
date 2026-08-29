@@ -1,7 +1,8 @@
-import {computed, reactive, ref} from 'vue'
-import type {ImageItem, WatermarkMap} from '@/types'
-import {drawWatermark, loadImageFromDataURL, loadImageFromFile, loadWatermark} from '@/utils'
-import {DEFAULT_PARAMS, WATERMARK_SOURCES} from '@/constants'
+import { computed, reactive, ref } from 'vue'
+import type { ImageItem, WatermarkMap } from '@/types'
+import { drawWatermark, loadImageFromDataURL, loadImageFromFile, loadWatermark } from '@/utils'
+import { loadLastSelection } from '@/utils/storage'
+import { DEFAULT_PARAMS, WATERMARK_SOURCES, BRANDS, DEFAULT_BRAND_KEY } from '@/constants'
 
 export function useWatermark() {
   const imageList = ref<ImageItem[]>([])
@@ -12,6 +13,12 @@ export function useWatermark() {
   const watermarkLoaded = reactive<Record<string, boolean>>({})
 
   const params = reactive({ ...DEFAULT_PARAMS })
+  const brandKey = ref(DEFAULT_BRAND_KEY)
+
+  // 从 wmKey 解析品牌 key
+  function extractBrandFromWmKey(wmKey: string): string {
+    return wmKey.split('/')[0] ?? DEFAULT_BRAND_KEY
+  }
 
   const status = ref('')
   const progress = ref('')
@@ -93,6 +100,23 @@ export function useWatermark() {
     currentIndex.value = index
   }
 
+  // 删除单张图片
+  function removeImage(index: number): void {
+    if (index < 0 || index >= imageList.value.length) return
+    imageList.value.splice(index, 1)
+
+    // 调整当前选中索引
+    if (imageList.value.length === 0) {
+      currentIndex.value = -1
+    } else if (index === currentIndex.value) {
+      // 删除的是当前选中的，选中前一张（或后一张）
+      currentIndex.value = Math.min(index, imageList.value.length - 1)
+    } else if (index < currentIndex.value) {
+      // 删除的在当前选中前面，索引减一
+      currentIndex.value--
+    }
+  }
+
   // 清空列表
   function clearList(): void {
     if (imageList.value.length === 0) return
@@ -169,9 +193,28 @@ export function useWatermark() {
     }
   }
 
-  // 重置参数
+  // 从缓存初始化品牌和水印选择
+  function initFromCache(): void {
+    const cached = loadLastSelection()
+    if (cached.wmKey) {
+      params.wmKey = cached.wmKey
+      brandKey.value = extractBrandFromWmKey(cached.wmKey)
+    } else if (cached.brandKey) {
+      // 只有品牌缓存时，选中该品牌的第一个水印
+      const brand = BRANDS.find((b) => b.key === cached.brandKey)
+      if (brand && brand.watermarks.length > 0) {
+        brandKey.value = brand.key
+        params.wmKey = brand.watermarks[0].value
+      }
+    }
+  }
+
+  // 重置参数（保留品牌和水印选择）
   function resetParams(): void {
+    const currentWmKey = params.wmKey
     Object.assign(params, DEFAULT_PARAMS)
+    params.wmKey = currentWmKey
+    // brandKey 也保持不变
   }
 
   return {
@@ -181,12 +224,15 @@ export function useWatermark() {
     watermarks,
     watermarkLoaded,
     params,
+    brandKey,
     status,
     progress,
     preloadWatermarks,
+    initFromCache,
     addFiles,
     addImageFromDataURL,
     selectImage,
+    removeImage,
     clearList,
     renderToCanvas,
     exportImageDataURL,

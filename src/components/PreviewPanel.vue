@@ -58,24 +58,29 @@ defineExpose({ render })
 
 <style scoped>
 .preview-panel {
+  width: 100%;
   flex: 1;
-  min-width: 0;
+  min-height: 0;
+  display: flex;
 }
 
 .canvas-wrap {
+  flex: 1;
+  min-height: 0;
   text-align: center;
-  background: #fafafa;
-  padding: 16px;
+  background: #f5f5f5;
+  padding: 8px;
   border-radius: 8px;
-  min-height: 200px;
   display: flex;
   align-items: center;
   justify-content: center;
+  overflow: hidden;
 }
 
 canvas {
   max-width: 100%;
-  max-height: 70vh;
+  max-height: 100%;
+  object-fit: contain;
   border-radius: 4px;
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
 }

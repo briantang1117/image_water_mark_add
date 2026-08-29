@@ -24,3 +24,15 @@ export interface RenderParams {
 export interface WatermarkMap {
   [key: string]: HTMLImageElement
 }
+
+export interface WatermarkOption {
+  value: string
+  label: string
+  src: string
+}
+
+export interface Brand {
+  key: string
+  label: string
+  watermarks: WatermarkOption[]
+}

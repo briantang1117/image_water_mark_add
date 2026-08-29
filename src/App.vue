@@ -6,6 +6,7 @@ import PreviewPanel from '@/components/PreviewPanel.vue'
 import ControlToolbar from '@/components/ControlToolbar.vue'
 import { useWatermark } from '@/composables/useWatermark'
 import { isNativeApp, isIOS, postToNative, makeOutputName, dataURLtoBlob, downloadBlob } from '@/utils'
+import { saveLastSelection } from '@/utils/storage'
 
 const {
   imageList,
@@ -15,9 +16,11 @@ const {
   status,
   progress,
   preloadWatermarks,
+  initFromCache,
   addFiles,
   addImageFromDataURL,
   selectImage,
+  removeImage,
   clearList,
   renderToCanvas,
   exportImageDataURL,
@@ -58,6 +61,14 @@ watch(
   },
 )
 
+// 水印选择变化时保存到缓存
+watch(
+  () => params.wmKey,
+  (newKey) => {
+    saveLastSelection(newKey)
+  },
+)
+
 // 选择图片按钮
 function handlePick(): void {
   if (isNativeApp()) {
@@ -76,6 +87,11 @@ function handleFileChange(e: Event): void {
   }
   // 允许重复选择同一文件
   target.value = ''
+}
+
+// 删除单张图片
+function handleRemove(index: number): void {
+  removeImage(index)
 }
 
 // 清空列表
@@ -180,6 +196,8 @@ function handleUpdateParams(updates: Record<string, unknown>): void {
 onMounted(() => {
   // 预加载水印
   preloadWatermarks()
+  // 从缓存恢复上次选择
+  initFromCache()
 
   // 注册原生回调
   if (typeof window !== 'undefined') {
@@ -224,7 +242,12 @@ onMounted(() => {
     <div class="progress">{{ progress }}</div>
 
     <div class="main-layout">
-      <ThumbPanel :image-list="imageList" :current-index="currentIndex" @select="selectImage" />
+      <ThumbPanel
+        :image-list="imageList"
+        :current-index="currentIndex"
+        @select="selectImage"
+        @remove="handleRemove"
+      />
       <PreviewPanel ref="previewRef" :current-image="currentImage" :render-fn="renderFn" />
     </div>
   </div>

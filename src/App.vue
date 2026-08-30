@@ -5,7 +5,7 @@ import ThumbPanel from '@/components/ThumbPanel.vue'
 import PreviewPanel from '@/components/PreviewPanel.vue'
 import ControlToolbar from '@/components/ControlToolbar.vue'
 import { useWatermark } from '@/composables/useWatermark'
-import { isNativeApp, isIOS, postToNative, makeOutputName, dataURLtoBlob, downloadBlob } from '@/utils'
+import { isNativeApp, isIOS, postToNative, makeOutputName, downloadBlob } from '@/utils'
 import { saveLastSelection } from '@/utils/storage'
 
 const {
@@ -23,7 +23,7 @@ const {
   removeImage,
   clearList,
   renderToCanvas,
-  exportImageDataURL,
+  exportImageBlob,
   resetParams,
 } = useWatermark()
 
@@ -102,30 +102,48 @@ function handleClear(): void {
 }
 
 // 下载当前图片
-function handleDownload(): void {
+async function handleDownload(): Promise<void> {
   if (currentIndex.value < 0 || !currentImage.value) {
     alert('请先上传并选中一张图片')
     return
   }
 
   const item = currentImage.value
-  const { dataURL, ext } = exportImageDataURL(item.img)
-  const outName = makeOutputName(item.name, ext)
+  status.value = `正在生成图片：${item.name}`
+  progress.value = ''
 
-  if (isNativeApp()) {
-    postToNative('saveImage', { dataURL, filename: outName })
-    return
-  }
+  try {
+    // 让 UI 先更新状态
+    await new Promise((r) => setTimeout(r, 0))
 
-  // 浏览器环境：用 Blob + ObjectURL 下载，兼容 iOS
-  const blob = dataURLtoBlob(dataURL)
-  downloadBlob(blob, outName)
+    const { blob, ext } = await exportImageBlob(item.img, item.originalBuffer)
+    const outName = makeOutputName(item.name, ext)
 
-  // iOS 提示用户长按保存
-  if (isIOS()) {
+    if (isNativeApp()) {
+      const reader = new FileReader()
+      reader.onload = () => {
+        postToNative('saveImage', { dataURL: reader.result as string, filename: outName })
+      }
+      reader.readAsDataURL(blob)
+      return
+    }
+
+    // 浏览器环境：用 Blob + ObjectURL 下载，兼容 iOS
+    downloadBlob(blob, outName)
+    progress.value = '✅ 已开始下载'
+
+    // iOS 提示用户长按保存
+    if (isIOS()) {
+      setTimeout(() => {
+        alert('如果没有自动保存，请长按图片选择「添加到照片」')
+      }, 500)
+    }
+  } finally {
+    // 2 秒后清除提示
     setTimeout(() => {
-      alert('如果没有自动保存，请长按图片选择「添加到照片」')
-    }, 500)
+      status.value = ''
+      progress.value = ''
+    }, 2000)
   }
 }
 
@@ -146,9 +164,8 @@ async function handleDownloadAll(): Promise<void> {
       const item = imageList.value[i]
       progress.value = `正在处理 ${i + 1}/${total}：${item.name}`
 
-      const { dataURL, ext } = exportImageDataURL(item.img)
+      const { blob, ext } = await exportImageBlob(item.img, item.originalBuffer)
       const outName = makeOutputName(item.name, ext)
-      const blob = dataURLtoBlob(dataURL)
       zip.file(outName, blob)
 
       // 让 UI 有机会更新

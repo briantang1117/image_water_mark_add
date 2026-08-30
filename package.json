@@ -13,6 +13,7 @@
   },
   "homepage": "https://briantang1117.github.io/image_water_mark_add/",
   "dependencies": {
+    "exifr": "^7.1.3",
     "jszip": "^3.10.1",
     "vue": "^3.4.0"
   },

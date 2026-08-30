@@ -1,6 +1,12 @@
 import { computed, reactive, ref } from 'vue'
 import type { ImageItem, WatermarkMap } from '@/types'
-import { drawWatermark, loadImageFromDataURL, loadImageFromFile, loadWatermark } from '@/utils'
+import {
+  drawWatermark,
+  injectExifToJpeg,
+  loadImageFromDataURL,
+  loadImageFromFile,
+  loadWatermark,
+} from '@/utils'
 import { loadLastSelection } from '@/utils/storage'
 import { DEFAULT_PARAMS, WATERMARK_SOURCES, BRANDS, DEFAULT_BRAND_KEY } from '@/constants'
 
@@ -54,12 +60,17 @@ export function useWatermark() {
     let loaded = 0
     for (const file of files) {
       try {
-        const { img, thumbDataURL, name } = await loadImageFromFile(file)
+        const { img, thumbDataURL, name, width, height, exif, originalBuffer } =
+          await loadImageFromFile(file)
         imageList.value.push({
           id: nextId++,
           name,
           img,
           thumbDataURL,
+          width,
+          height,
+          exif,
+          originalBuffer,
         })
         loaded++
         status.value = `正在加载... ${loaded}/${files.length}`
@@ -79,12 +90,17 @@ export function useWatermark() {
   // 从 dataURL 添加一张图片（原生 app 回调）
   async function addImageFromDataURL(dataURL: string, fileName: string): Promise<void> {
     try {
-      const { img, thumbDataURL, name } = await loadImageFromDataURL(dataURL, fileName)
+      const { img, thumbDataURL, name, width, height, exif, originalBuffer } =
+        await loadImageFromDataURL(dataURL, fileName)
       imageList.value.push({
         id: nextId++,
         name,
         img,
         thumbDataURL,
+        width,
+        height,
+        exif,
+        originalBuffer,
       })
       if (currentIndex.value < 0) {
         selectImage(0)
@@ -193,6 +209,45 @@ export function useWatermark() {
     }
   }
 
+  // 导出图片为 Blob（JPEG 时会写回原始 EXIF）
+  async function exportImageBlob(
+    img: HTMLImageElement,
+    originalBuffer?: ArrayBuffer,
+  ): Promise<{ blob: Blob; ext: string }> {
+    const watermarkImg = watermarks.value[params.wmKey]
+    if (!watermarkImg) throw new Error('水印未加载')
+
+    const exportCanvas = document.createElement('canvas')
+    exportCanvas.width = img.width
+    exportCanvas.height = img.height
+    const ectx = exportCanvas.getContext('2d')
+    if (!ectx) throw new Error('无法创建 canvas 上下文')
+
+    const quality = params.quality / 100
+    renderToCanvas(ectx, img.width, img.height, img)
+
+    if (params.format === 'png') {
+      const blob = await new Promise<Blob>((resolve, reject) => {
+        exportCanvas.toBlob(
+          (b) => (b ? resolve(b) : reject(new Error('canvas toBlob 失败'))),
+          'image/png',
+        )
+      })
+      return { blob, ext: 'png' }
+    } else {
+      const blob = await new Promise<Blob>((resolve, reject) => {
+        exportCanvas.toBlob(
+          (b) => (b ? resolve(b) : reject(new Error('canvas toBlob 失败'))),
+          'image/jpeg',
+          quality,
+        )
+      })
+      // JPEG：注入原始 EXIF
+      const finalBlob = await injectExifToJpeg(blob, originalBuffer)
+      return { blob: finalBlob, ext: 'jpg' }
+    }
+  }
+
   // 从缓存初始化品牌和水印选择
   function initFromCache(): void {
     const cached = loadLastSelection()
@@ -236,6 +291,7 @@ export function useWatermark() {
     clearList,
     renderToCanvas,
     exportImageDataURL,
+    exportImageBlob,
     resetParams,
   }
 }

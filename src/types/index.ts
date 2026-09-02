@@ -21,6 +21,8 @@ export interface ImageItem {
   exif?: ExifInfo
   /** 原始文件 ArrayBuffer（用于导出时写回 EXIF），仅 JPEG 有效 */
   originalBuffer?: ArrayBuffer
+  /** 该图片使用的水印 key（空字符串表示无水印） */
+  wmKey: string
 }
 
 export type BlendMode = 'screen' | 'lighten' | 'soft-light' | 'multiply' | 'source-over'

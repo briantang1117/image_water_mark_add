@@ -6,17 +6,17 @@ import PreviewPanel from '@/components/PreviewPanel.vue'
 import ControlToolbar from '@/components/ControlToolbar.vue'
 import { useWatermark } from '@/composables/useWatermark'
 import { isNativeApp, isIOS, postToNative, makeOutputName, downloadBlob } from '@/utils'
-import { saveLastSelection } from '@/utils/storage'
 
 const {
   imageList,
   currentIndex,
   currentImage,
+  currentWmKey,
+  currentBrandKey,
   params,
   status,
   progress,
   preloadWatermarks,
-  initFromCache,
   addFiles,
   addImageFromDataURL,
   selectImage,
@@ -31,20 +31,20 @@ const fileInputRef = ref<HTMLInputElement | null>(null)
 const previewRef = ref<InstanceType<typeof PreviewPanel> | null>(null)
 const isExporting = ref(false)
 
-// 渲染函数传给预览组件
+// 渲染函数传给预览组件（使用当前图片自己的水印）
 function renderFn(
   ctx: CanvasRenderingContext2D,
   w: number,
   h: number,
   img: HTMLImageElement,
 ): void {
-  renderToCanvas(ctx, w, h, img)
+  const wmKey = currentImage.value?.wmKey ?? ''
+  renderToCanvas(ctx, w, h, img, wmKey)
 }
 
 // 参数变化时重新渲染预览
 watch(
   [
-    () => params.wmKey,
     () => params.blendMode,
     () => params.fitMode,
     () => params.opacity,
@@ -61,13 +61,19 @@ watch(
   },
 )
 
-// 水印选择变化时保存到缓存
-watch(
-  () => params.wmKey,
-  (newKey) => {
-    saveLastSelection(newKey)
-  },
-)
+// 当前水印 key 变化时重新渲染预览
+watch(currentWmKey, () => {
+  nextTick(() => {
+    previewRef.value?.render()
+  })
+})
+
+// 选中图片变化时，重新渲染预览
+watch(currentImage, () => {
+  nextTick(() => {
+    previewRef.value?.render()
+  })
+})
 
 // 选择图片按钮
 function handlePick(): void {
@@ -116,7 +122,7 @@ async function handleDownload(): Promise<void> {
     // 让 UI 先更新状态
     await new Promise((r) => setTimeout(r, 0))
 
-    const { blob, ext } = await exportImageBlob(item.img, item.originalBuffer)
+    const { blob, ext } = await exportImageBlob(item.img, item.originalBuffer, item.wmKey)
     const outName = makeOutputName(item.name, ext)
 
     if (isNativeApp()) {
@@ -147,7 +153,7 @@ async function handleDownload(): Promise<void> {
   }
 }
 
-// 下载全部（ZIP）
+// 下载全部（ZIP）— 每张图片使用自己的水印配置
 async function handleDownloadAll(): Promise<void> {
   if (imageList.value.length === 0) {
     alert('请先上传图片')
@@ -164,7 +170,7 @@ async function handleDownloadAll(): Promise<void> {
       const item = imageList.value[i]
       progress.value = `正在处理 ${i + 1}/${total}：${item.name}`
 
-      const { blob, ext } = await exportImageBlob(item.img, item.originalBuffer)
+      const { blob, ext } = await exportImageBlob(item.img, item.originalBuffer, item.wmKey)
       const outName = makeOutputName(item.name, ext)
       zip.file(outName, blob)
 
@@ -204,7 +210,17 @@ function handleReset(): void {
   resetParams()
 }
 
-// 更新 params（从工具栏）
+// 更新水印 key（从工具栏）
+function handleUpdateWmKey(wmKey: string): void {
+  currentWmKey.value = wmKey
+}
+
+// 更新品牌 key（从工具栏）
+function handleUpdateBrandKey(brandKey: string): void {
+  currentBrandKey.value = brandKey
+}
+
+// 更新其他参数（从工具栏）
 function handleUpdateParams(updates: Record<string, unknown>): void {
   Object.assign(params, updates)
 }
@@ -213,8 +229,6 @@ function handleUpdateParams(updates: Record<string, unknown>): void {
 onMounted(() => {
   // 预加载水印
   preloadWatermarks()
-  // 从缓存恢复上次选择
-  initFromCache()
 
   // 注册原生回调
   if (typeof window !== 'undefined') {
@@ -245,8 +259,13 @@ onMounted(() => {
     />
 
     <ControlToolbar
+      :wm-key="currentWmKey"
+      :brand-key="currentBrandKey"
       :params="params"
+      :has-current-image="!!currentImage"
       :is-exporting="isExporting"
+      @update:wm-key="handleUpdateWmKey"
+      @update:brand-key="handleUpdateBrandKey"
       @update:params="handleUpdateParams"
       @pick="handlePick"
       @clear="handleClear"

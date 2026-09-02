@@ -64,9 +64,7 @@ export const BRANDS: Brand[] = Array.from(brandMap.values())
   }))
 
 // 打平的水印列表（兼容旧代码）
-export const WATERMARK_OPTIONS: WatermarkOption[] = BRANDS.flatMap(
-  (brand) => brand.watermarks,
-)
+export const WATERMARK_OPTIONS: WatermarkOption[] = BRANDS.flatMap((brand) => brand.watermarks)
 
 // 水印 key -> src 的映射表
 export const WATERMARK_SOURCES: Record<string, string> = WATERMARK_OPTIONS.reduce(
@@ -77,10 +75,10 @@ export const WATERMARK_SOURCES: Record<string, string> = WATERMARK_OPTIONS.reduc
   {} as Record<string, string>,
 )
 
-// 默认品牌和水印 key（取第一个品牌的第一个水印）
+// 默认品牌 key（取第一个品牌）
 export const DEFAULT_BRAND_KEY = BRANDS[0]?.key ?? 'dji'
-export const DEFAULT_WATERMARK_KEY =
-  BRANDS[0]?.watermarks[0]?.value ?? 'dji/DJI-OP4P-横屏'
+// 默认水印 key：空字符串表示无水印
+export const DEFAULT_WATERMARK_KEY = ''
 
 export const BLEND_MODE_OPTIONS: Array<{ value: string; label: string }> = [
   { value: 'screen', label: 'Screen 滤色（黑底水印推荐）' },

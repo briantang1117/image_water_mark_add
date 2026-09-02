@@ -1,5 +1,6 @@
 import exifr from 'exifr'
 import type { ExifInfo } from '@/types'
+import { BRANDS } from '@/constants'
 
 /**
  * 判断是否运行在原生 app 内 (iOS WKWebView)
@@ -18,9 +19,11 @@ export function isNativeApp(): boolean {
  */
 export function isIOS(): boolean {
   if (typeof navigator === 'undefined') return false
-  return /iPad|iPhone|iPod/.test(navigator.userAgent) ||
+  return (
+    /iPad|iPhone|iPod/.test(navigator.userAgent) ||
     // iPadOS 13+ 伪装成 Mac，但有触控
     (navigator.platform === 'MacIntel' && 'ontouchend' in document)
+  )
 }
 
 /**
@@ -73,9 +76,7 @@ export async function loadImageFromFile(file: File): Promise<{
   const exif = await parseExif(arrayBuffer)
   // 仅 JPEG 保留原始 buffer 用于 EXIF 写回
   const isJpeg =
-    file.type === 'image/jpeg' ||
-    file.type === 'image/jpg' ||
-    /\.jpe?g$/i.test(file.name)
+    file.type === 'image/jpeg' || file.type === 'image/jpg' || /\.jpe?g$/i.test(file.name)
   const originalBuffer = isJpeg ? arrayBuffer : undefined
   console.log(
     `[loadImageFromFile] ${file.name}: type=${file.type}, isJpeg=${isJpeg}, ` +
@@ -379,7 +380,9 @@ function extractExifApp1(buffer: ArrayBuffer): Uint8Array | null {
   while (offset < view.length - 1) {
     // marker 必须以 FF 开头
     if (view[offset] !== 0xff) {
-      console.warn(`[extractExifApp1] marker 扫描中断: offset=${offset}, byte=0x${view[offset].toString(16)}`)
+      console.warn(
+        `[extractExifApp1] marker 扫描中断: offset=${offset}, byte=0x${view[offset].toString(16)}`,
+      )
       break
     }
     const marker = view[offset + 1]
@@ -397,7 +400,13 @@ function extractExifApp1(buffer: ArrayBuffer): Uint8Array | null {
       // 检查 "Exif\0\0" 签名
       const sigBytes = view.slice(offset + 4, offset + 10)
       const sig = String.fromCharCode(...sigBytes)
-      console.log(`[extractExifApp1] 找到 APP1，签名前6字节: `, Array.from(sigBytes).map(b => b.toString(16)).join(' '), `"${sig}"`)
+      console.log(
+        `[extractExifApp1] 找到 APP1，签名前6字节: `,
+        Array.from(sigBytes)
+          .map((b) => b.toString(16))
+          .join(' '),
+        `"${sig}"`,
+      )
       if (sig === 'Exif\0\0') {
         const app1Len = 2 + segLen
         console.log(`[extractExifApp1] ✅ 匹配 Exif 签名，APP1 段长度=${app1Len}`)
@@ -513,4 +522,80 @@ export function injectExifToJpeg(
     reader.onerror = () => resolve(newJpegBlob)
     reader.readAsArrayBuffer(newJpegBlob)
   })
+}
+
+/**
+ * 规范化品牌名称（用于 EXIF make 与文件夹名匹配）
+ * 忽略大小写、空格、连字符等差异
+ */
+function normalizeBrand(name: string): string {
+  return name
+    .toLowerCase()
+    .replace(/[^a-z0-9]/g, '')
+    .trim()
+}
+
+/**
+ * 规范化型号名称（用于 EXIF model 与水印文件名匹配）
+ * 忽略大小写、空格、连字符、前缀品牌名等
+ */
+function normalizeModel(name: string): string {
+  return name
+    .toLowerCase()
+    .replace(/[^a-z0-9]/g, '')
+    .trim()
+}
+
+/**
+ * 根据 EXIF 信息和图片尺寸自动检测匹配的水印
+ *
+ * 匹配规则（精确匹配，两边均规范化后对比）：
+ * 1. 有 make 时：先匹配品牌，再在品牌内匹配型号
+ * 2. 无 make 时：直接用 model 在所有品牌中匹配型号（反推品牌）
+ * 3. 型号匹配：EXIF.model → 水印文件名去掉 -横屏/-竖屏 后缀
+ * 4. 方向匹配：宽 > 高 → 横屏；宽 ≤ 高（含正方形）→ 竖屏
+ *
+ * @param exif EXIF 信息
+ * @param width 图片宽度
+ * @param height 图片高度
+ * @returns 匹配到的水印 key，未匹配到返回空字符串
+ */
+export function autoDetectWatermark(
+  exif: ExifInfo | undefined,
+  width: number,
+  height: number,
+): string {
+  if (!exif || !exif.model) return ''
+
+  const modelNorm = normalizeModel(exif.model)
+  const makeNorm = exif.make ? normalizeBrand(exif.make) : null
+
+  // 判断横竖屏：宽 > 高 为横屏，否则为竖屏（正方形用竖屏）
+  const isLandscape = width > height
+  const orientationSuffix = isLandscape ? '-横屏' : '-竖屏'
+
+  // 遍历所有品牌匹配型号
+  for (const brand of BRANDS) {
+    // 有 make 时先匹配品牌
+    if (makeNorm) {
+      const brandNorm = normalizeBrand(brand.key)
+      if (brandNorm !== makeNorm) continue
+    }
+
+    for (const wm of brand.watermarks) {
+      // 水印文件名格式：<型号>-<横屏/竖屏>
+      const wmName = wm.value.split('/').pop() || ''
+      // 方向必须匹配
+      if (!wmName.endsWith(orientationSuffix)) continue
+      // 去掉方向后缀，得到纯型号名
+      const wmModel = wmName.slice(0, -orientationSuffix.length)
+      const wmModelNorm = normalizeModel(wmModel)
+
+      if (wmModelNorm === modelNorm) {
+        return wm.value
+      }
+    }
+  }
+
+  return ''
 }

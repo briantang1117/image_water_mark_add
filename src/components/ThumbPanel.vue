@@ -33,9 +33,7 @@ function handleRemove(e: Event, index: number): void {
         @click="emit('select', index)"
       >
         <img :src="item.thumbDataURL" alt="" />
-        <button class="thumb-remove" @click="handleRemove($event, index)" title="删除">
-          ×
-        </button>
+        <button class="thumb-remove" title="删除" @click="handleRemove($event, index)">×</button>
       </div>
     </div>
   </div>

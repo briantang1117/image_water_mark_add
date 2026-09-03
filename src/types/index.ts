@@ -23,6 +23,12 @@ export interface ImageItem {
   originalBuffer?: ArrayBuffer
   /** 该图片使用的水印 key（空字符串表示无水印） */
   wmKey: string
+  /** 该图片使用的 LUT id（空字符串表示无 LUT） */
+  lutId: string
+  /** 该图片的 LUT 浓度 0~100 */
+  lutIntensity: number
+  /** 该图片的 LUT 渲染模式 */
+  lutMode: LutMode
 }
 
 export type BlendMode = 'screen' | 'lighten' | 'soft-light' | 'multiply' | 'source-over'
@@ -55,4 +61,42 @@ export interface Brand {
   key: string
   label: string
   watermarks: WatermarkOption[]
+}
+
+// ==================== LUT 相关类型 ====================
+
+/** 解析后的 3D LUT 数据 */
+export interface Lut3D {
+  /** 唯一标识（通常用文件名） */
+  id: string
+  /** 显示名称 */
+  label: string
+  /** LUT 尺寸，如 17/33/65 */
+  size: number
+  /** TITLE 字段（如果有） */
+  title?: string
+  /** DOMAIN_MIN，默认 [0,0,0] */
+  domainMin: [number, number, number]
+  /** DOMAIN_MAX，默认 [1,1,1] */
+  domainMax: [number, number, number]
+  /**
+   * LUT 数据，Float32Array，长度 = size^3 * 3
+   * 索引顺序：R 变化最快（最内层），G 中间，B 最慢（最外层）
+   * 即 data[(b * size * size + g * size + r) * 3 + channel]
+   * channel: 0=R, 1=G, 2=B
+   */
+  data: Float32Array
+}
+
+/** LUT 渲染模式 */
+export type LutMode = 'ps' | 'professional'
+
+/** LUT 面板参数 */
+export interface LutParams {
+  /** 当前选中的 LUT id，空表示无 LUT */
+  lutId: string
+  /** 浓度 0~100 */
+  intensity: number
+  /** 渲染模式：PS兼容 / 严谨专业 */
+  mode: LutMode
 }

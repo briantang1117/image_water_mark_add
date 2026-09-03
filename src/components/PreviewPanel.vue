@@ -1,50 +1,29 @@
 <script setup lang="ts">
-import { ref, watch, onMounted, computed } from 'vue'
+import { ref, watch, onMounted, onBeforeUnmount, computed, nextTick } from 'vue'
 import type { ImageItem } from '@/types'
+import { LutRenderer, isWebGL2Supported } from '@/utils/lutRenderer'
+import { useLut } from '@/composables/useLut'
 
 const props = defineProps<{
   currentImage: ImageItem | null
-  renderFn: (ctx: CanvasRenderingContext2D, w: number, h: number, img: HTMLImageElement) => void
+  /** 水印绘制函数（在已画好底图的 Canvas2D 上叠加水印） */
+  renderWatermark: (ctx: CanvasRenderingContext2D, w: number, h: number) => void
 }>()
 
-const canvasRef = ref<HTMLCanvasElement | null>(null)
+const emit = defineEmits<{
+  rendered: []
+}>()
+
+const displayCanvasRef = ref<HTMLCanvasElement | null>(null)
 const showCanvas = ref(false)
+const showOriginal = ref(false)
 
-function render(): void {
-  if (!props.currentImage || !canvasRef.value) return
-  const canvas = canvasRef.value
-  const ctx = canvas.getContext('2d')
-  if (!ctx) return
+// 离屏 WebGL renderer（不直接显示，用于生成 LUT 处理后的底图）
+let lutRenderer: LutRenderer | null = null
+let webglCanvas: HTMLCanvasElement | null = null
+let webglSupported = true
 
-  const { img } = props.currentImage
-  canvas.width = img.width
-  canvas.height = img.height
-  showCanvas.value = true
-
-  props.renderFn(ctx, img.width, img.height, img)
-}
-
-watch(
-  () => props.currentImage,
-  (val) => {
-    if (!val) {
-      showCanvas.value = false
-      return
-    }
-    // 等待 DOM 更新后渲染
-    requestAnimationFrame(render)
-  },
-  { immediate: true },
-)
-
-onMounted(() => {
-  if (props.currentImage) {
-    render()
-  }
-})
-
-// 暴露 render 方法给父组件
-defineExpose({ render })
+const { params: lutParams, getCurrentLut } = useLut()
 
 // 格式化尺寸显示
 const sizeText = computed(() => {
@@ -75,6 +54,188 @@ const exifEntries = computed(() => {
   if (exif.software) entries.push({ label: '软件', value: exif.software })
   return entries
 })
+
+// 初始化 WebGL 渲染器（离屏）
+function initRenderer(): void {
+  if (!isWebGL2Supported()) {
+    webglSupported = false
+    console.warn('WebGL2 不支持，LUT 功能不可用')
+    return
+  }
+  try {
+    webglCanvas = document.createElement('canvas')
+    lutRenderer = new LutRenderer(webglCanvas)
+  } catch (e) {
+    webglSupported = false
+    console.error('初始化 WebGL 渲染器失败:', e)
+  }
+}
+
+/**
+ * 渲染 LUT 到底图（离屏 WebGL）
+ * 返回 WebGL canvas（包含 LUT 处理后的图；无 LUT 时返回原图）
+ */
+function renderLutToOffscreen(): HTMLCanvasElement | null {
+  if (!props.currentImage) return null
+  const { img, width, height } = props.currentImage
+
+  if (!lutRenderer || !webglSupported) {
+    // WebGL 不可用时，直接用原图
+    // 临时创建 canvas 画原图
+    const tmp = document.createElement('canvas')
+    tmp.width = width
+    tmp.height = height
+    const ctx = tmp.getContext('2d')
+    if (ctx) ctx.drawImage(img, 0, 0)
+    return tmp
+  }
+
+  // 上传图片 + LUT
+  lutRenderer.uploadImage(img)
+  const lut = getCurrentLut()
+  lutRenderer.uploadLut(lut)
+
+  // 渲染
+  const intensity = lut && lutParams.lutId ? lutParams.intensity / 100 : 0
+  lutRenderer.render(width, height, intensity, lutParams.mode)
+
+  return webglCanvas
+}
+
+/**
+ * 完整渲染：LUT 底图 + 水印 → 显示 canvas
+ */
+function render(): void {
+  if (!props.currentImage || !displayCanvasRef.value) {
+    showCanvas.value = false
+    return
+  }
+  showCanvas.value = true
+
+  nextTick(() => {
+    const { width, height, img } = props.currentImage!
+    const canvas = displayCanvasRef.value!
+    if (canvas.width !== width) canvas.width = width
+    if (canvas.height !== height) canvas.height = height
+
+    const ctx = canvas.getContext('2d')
+    if (!ctx) return
+
+    // 原图模式：直接画原图，跳过 LUT + 水印
+    if (showOriginal.value) {
+      ctx.clearRect(0, 0, width, height)
+      ctx.drawImage(img, 0, 0)
+      emit('rendered')
+      return
+    }
+
+    if (!lutRenderer && !webglCanvas) {
+      initRenderer()
+    }
+
+    // 1. LUT 底图（WebGL 离屏渲染）
+    const lutCanvas = renderLutToOffscreen()
+    if (lutCanvas) {
+      ctx.clearRect(0, 0, width, height)
+      ctx.drawImage(lutCanvas, 0, 0)
+    }
+
+    // 2. 叠加水印（Canvas2D 混合模式完全正确）
+    props.renderWatermark(ctx, width, height)
+
+    emit('rendered')
+  })
+}
+
+/**
+ * 仅重绘水印（LUT 不变时复用离屏结果）
+ */
+function refreshWatermark(): void {
+  if (!props.currentImage || !displayCanvasRef.value || !showCanvas.value) return
+
+  const { width, height } = props.currentImage
+  const canvas = displayCanvasRef.value
+  const ctx = canvas.getContext('2d')
+  if (!ctx) return
+
+  // 重画 LUT 底图
+  if (webglCanvas) {
+    ctx.clearRect(0, 0, width, height)
+    ctx.drawImage(webglCanvas, 0, 0)
+  } else {
+    ctx.clearRect(0, 0, width, height)
+    ctx.drawImage(props.currentImage.img, 0, 0)
+  }
+
+  // 重画水印
+  props.renderWatermark(ctx, width, height)
+}
+
+/**
+ * LUT 变化时重渲（需要重新跑 WebGL + 重画水印）
+ */
+function refreshLut(): void {
+  if (!props.currentImage || !showCanvas.value) return
+  render()
+}
+
+/**
+ * 切换原图 / 效果图对比
+ */
+function toggleOriginal(): void {
+  showOriginal.value = !showOriginal.value
+  render()
+}
+
+// 当前图片变化 → 完整重渲染
+watch(
+  () => props.currentImage,
+  (val) => {
+    if (!val) {
+      showCanvas.value = false
+      return
+    }
+    requestAnimationFrame(render)
+  },
+  { immediate: true },
+)
+
+// LUT 参数变化 → 重渲 LUT + 水印
+watch(
+  [() => lutParams.lutId, () => lutParams.intensity, () => lutParams.mode],
+  () => {
+    if (showCanvas.value) {
+      requestAnimationFrame(refreshLut)
+    }
+  },
+)
+
+onMounted(() => {
+  if (props.currentImage) {
+    render()
+  }
+})
+
+onBeforeUnmount(() => {
+  if (lutRenderer) {
+    lutRenderer.destroy()
+    lutRenderer = null
+  }
+  webglCanvas = null
+})
+
+// 暴露方法给父组件
+defineExpose({
+  render,
+  refreshLut,
+  refreshWatermark,
+  /**
+   * 获取合成后的最终 canvas（用于导出）
+   */
+  getFinalCanvas(): HTMLCanvasElement | null {
+    return displayCanvasRef.value
+  },
+})
 </script>
 
 <template>
@@ -101,7 +262,20 @@ const exifEntries = computed(() => {
 
     <div class="canvas-wrap">
       <div v-if="!showCanvas" class="placeholder">请先选择图片</div>
-      <canvas ref="canvasRef" :style="{ display: showCanvas ? 'inline-block' : 'none' }" />
+      <canvas
+        v-show="showCanvas"
+        ref="displayCanvasRef"
+        class="preview-canvas"
+      />
+      <button
+        v-if="showCanvas"
+        class="orig-toggle-btn"
+        :class="{ active: showOriginal }"
+        @click="toggleOriginal"
+        :title="showOriginal ? '显示效果' : '显示原图'"
+      >
+        {{ showOriginal ? '✨ 效果图' : '🖼 原图' }}
+      </button>
     </div>
   </div>
 </template>
@@ -189,16 +363,51 @@ const exifEntries = computed(() => {
   overflow: hidden;
 }
 
-canvas {
+.preview-canvas {
   max-width: 100%;
   max-height: 100%;
   object-fit: contain;
   border-radius: 4px;
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+  display: inline-block;
 }
 
 .placeholder {
   color: #999;
   font-size: 14px;
+}
+
+.canvas-wrap {
+  position: relative;
+}
+
+.orig-toggle-btn {
+  position: absolute;
+  right: 16px;
+  bottom: 16px;
+  padding: 8px 16px;
+  background: rgba(0, 0, 0, 0.65);
+  color: #fff;
+  border: none;
+  border-radius: 20px;
+  font-size: 13px;
+  cursor: pointer;
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  transition: all 0.15s;
+  z-index: 10;
+}
+
+.orig-toggle-btn:hover {
+  background: rgba(0, 0, 0, 0.8);
+  transform: scale(1.03);
+}
+
+.orig-toggle-btn.active {
+  background: rgba(255, 149, 0, 0.85);
+}
+
+.orig-toggle-btn.active:hover {
+  background: rgba(255, 149, 0, 0.95);
 }
 </style>

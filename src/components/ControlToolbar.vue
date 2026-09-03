@@ -1,10 +1,6 @@
 <script setup lang="ts">
 import { computed } from 'vue'
-import {
-  BRANDS,
-  BLEND_MODE_OPTIONS,
-  FORMAT_OPTIONS,
-} from '@/constants'
+import { BRANDS, BLEND_MODE_OPTIONS } from '@/constants'
 
 const props = defineProps<{
   wmKey: string
@@ -21,15 +17,12 @@ const props = defineProps<{
     quality: number
   }
   hasCurrentImage: boolean
-  isExporting: boolean
 }>()
 
 const emit = defineEmits<{
   'update:wmKey': [wmKey: string]
   'update:brandKey': [brandKey: string]
   'update:params': [params: Record<string, unknown>]
-  download: []
-  downloadAll: []
   reset: []
 }>()
 
@@ -54,8 +47,6 @@ function handleWmChange(e: Event): void {
   const wmKey = (e.target as HTMLSelectElement).value
   emit('update:wmKey', wmKey)
 }
-
-const isJpeg = computed(() => props.params.format === 'jpeg')
 </script>
 
 <template>
@@ -121,45 +112,6 @@ const isJpeg = computed(() => props.params.format === 'jpeg')
       </div>
     </div>
     <div class="row">
-      <label>
-        导出格式：
-        <select
-          :value="params.format"
-          @change="updateParam('format', ($event.target as HTMLSelectElement).value)"
-        >
-          <option v-for="opt in FORMAT_OPTIONS" :key="opt.value" :value="opt.value">
-            {{ opt.label }}
-          </option>
-        </select>
-      </label>
-      <div class="slider-group">
-        <span>JPG 质量：</span>
-        <input
-          type="range"
-          min="0"
-          max="100"
-          :value="params.quality"
-          :disabled="!isJpeg"
-          @input="updateParam('quality', Number(($event.target as HTMLInputElement).value))"
-        />
-        <input
-          type="number"
-          min="0"
-          max="100"
-          :value="params.quality"
-          :disabled="!isJpeg"
-          style="width: 64px"
-          @input="updateParam('quality', Number(($event.target as HTMLInputElement).value))"
-        />
-        <span class="slider-val">{{ params.quality }}%</span>
-      </div>
-    </div>
-
-    <div class="row">
-      <button @click="emit('download')">下载当前图片</button>
-      <button :disabled="isExporting" @click="emit('downloadAll')">
-        {{ isExporting ? '处理中...' : '下载全部 (ZIP)' }}
-      </button>
       <button class="secondary" @click="emit('reset')">重置参数</button>
     </div>
   </div>

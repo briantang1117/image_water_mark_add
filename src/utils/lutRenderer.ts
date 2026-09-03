@@ -39,6 +39,11 @@ export class LutRenderer {
   private uIntensityLocation: WebGLUniformLocation | null = null
   private uModeLocation: WebGLUniformLocation | null = null
   private uHasLutLocation: WebGLUniformLocation | null = null
+  private uDomainMinLocation: WebGLUniformLocation | null = null
+  private uDomainMaxLocation: WebGLUniformLocation | null = null
+  /** P2-1：当前 LUT 的 DOMAIN_MIN/MAX（默认 0..1） */
+  private lutDomainMin: [number, number, number] = [0, 0, 0]
+  private lutDomainMax: [number, number, number] = [1, 1, 1]
 
   constructor(canvas: HTMLCanvasElement) {
     const gl = canvas.getContext('webgl2', {
@@ -82,6 +87,8 @@ export class LutRenderer {
     uniform float u_intensity;   // 0.0 ~ 1.0
     uniform int u_mode;          // 0 = PS模式, 1 = 严谨模式
     uniform int u_hasLut;        // 0 = 无LUT, 1 = 有LUT
+    uniform vec3 u_domainMin;    // LUT DOMAIN_MIN（默认 0）
+    uniform vec3 u_domainMax;    // LUT DOMAIN_MAX（默认 1）
 
     // sRGB → 线性 (去掉 sRGB 伽马)
     vec3 srgbToLinear(vec3 c) {
@@ -123,6 +130,12 @@ export class LutRenderer {
       return texture(u_lut, uvw).rgb;
     }
 
+    // P2-1：把查表输入按 DOMAIN_MIN/MAX 归一到 [0,1]（0..1 domain 时为恒等）
+    vec3 domainMap(vec3 c) {
+      vec3 range = max(u_domainMax - u_domainMin, vec3(1e-6));
+      return clamp((c - u_domainMin) / range, 0.0, 1.0);
+    }
+
     void main() {
       vec4 texColor = texture(u_image, v_uv);
       vec3 src = texColor.rgb;  // 输入是 sRGB 编码
@@ -137,14 +150,14 @@ export class LutRenderer {
       if (u_mode == 0) {
         // ========== sRGB 直查模式（对照 PS 颜色查找） ==========
         // 直接对 sRGB 编码像素查表，仅当配方确为 sRGB/PS 生态制作用。
-        lutResult = sampleLut(clamp(src, 0.0, 1.0));
+        lutResult = sampleLut(domainMap(src));
       } else {
         // ========== Rec.709 还原模式（默认） ==========
         // sRGB → 线性 → Rec.709 显示信号 → LUT → Rec.709 显示信号 → 线性 → sRGB
         // 语义等价达芬奇「dlog → Rec.709 → 套 LUT」对同一画面（Rec.709 输入配方）。
         vec3 linear = srgbToLinear(src);
         vec3 rec709Sig = linearToRec709(linear);
-        vec3 lutOut = sampleLut(clamp(rec709Sig, 0.0, 1.0));
+        vec3 lutOut = sampleLut(domainMap(rec709Sig));
         vec3 lutLinear = rec709ToLinear(lutOut);
         lutResult = linearToSrgb(lutLinear);
       }
@@ -230,6 +243,8 @@ export class LutRenderer {
     this.uIntensityLocation = gl.getUniformLocation(this.program, 'u_intensity')
     this.uModeLocation = gl.getUniformLocation(this.program, 'u_mode')
     this.uHasLutLocation = gl.getUniformLocation(this.program, 'u_hasLut')
+    this.uDomainMinLocation = gl.getUniformLocation(this.program, 'u_domainMin')
+    this.uDomainMaxLocation = gl.getUniformLocation(this.program, 'u_domainMax')
 
     // 纹理单元绑定：image = 0, lut = 1
     gl.uniform1i(this.uImageLocation, 0)
@@ -258,8 +273,10 @@ export class LutRenderer {
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR)
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR)
 
-    // 超纹理上限保护：等比缩到 ≤ maxTextureSize 再上传，避免 texImage2D 静默失败（黑图/旧帧）
-    const src = this.clampSourceToMax(img)
+    // P0-2 + P2-3：先画进 Canvas2D 做统一处理——
+    // ① 浏览器色彩管理把带 ICC(Display-P3/AdobeRGB) 的图归一到 sRGB 工作空间(与 Canvas2D 预览一致)；
+    // ② 等比缩到 ≤ maxTextureSize，避免超限 texImage2D 静默失败。一次 draw 两件事。
+    const src = this.prepareUploadSource(img)
     // 用 SRGB8_ALPHA8 内部格式，让 shader 中采样的值就是 sRGB 编码的
     // 这里我们用普通 RGBA，因为我们的 shader 自己管理伽马
     gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, src)
@@ -272,17 +289,29 @@ export class LutRenderer {
     this.uploadedImageKey = null
   }
 
-  /** 若源尺寸超过 GPU 纹理上限，等比降采样到上限内并返回 canvas，否则原样返回 */
-  private clampSourceToMax(
+  /**
+   * 归一上传源：始终画进一个 Canvas2D（浏览器默认 sRGB 工作空间），以该 canvas 作为纹理源。
+   *
+   * P2-3：WebGL 直接 texImage2D(<img>) 时，各浏览器对带 ICC 图片(Display-P3/AdobeRGB)的
+   * 色彩管理不一致(可能拿到非 sRGB 原始值)；而 Canvas2D drawImage 会把图像色彩管理到 sRGB
+   * 工作空间。统一经 canvas 上传，让 WebGL 采样值 = Canvas2D 预览/水印路径一致。
+   * P0-2：顺带等比缩到 ≤ maxTextureSize，避免超限静默失败。
+   */
+  private prepareUploadSource(
     src: HTMLImageElement | HTMLCanvasElement | ImageBitmap,
-  ): HTMLImageElement | HTMLCanvasElement | ImageBitmap {
-    if (src.width <= this.maxTextureSize && src.height <= this.maxTextureSize) return src
-    const scale = Math.min(this.maxTextureSize / src.width, this.maxTextureSize / src.height)
+  ): HTMLCanvasElement {
+    const scale = Math.min(
+      1,
+      this.maxTextureSize / src.width,
+      this.maxTextureSize / src.height,
+    )
     const c = document.createElement('canvas')
     c.width = Math.max(1, Math.round(src.width * scale))
     c.height = Math.max(1, Math.round(src.height * scale))
     const ctx = c.getContext('2d')
-    if (!ctx) return src
+    if (!ctx) {
+      throw new Error('无法创建 Canvas2D 用于 LUT 图像处理')
+    }
     ctx.drawImage(src, 0, 0, c.width, c.height)
     return c
   }
@@ -317,6 +346,8 @@ export class LutRenderer {
       }
       this.currentLutSize = 0
       this.uploadedLutKey = null
+      this.lutDomainMin = [0, 0, 0]
+      this.lutDomainMax = [1, 1, 1]
       return
     }
 
@@ -352,6 +383,8 @@ export class LutRenderer {
     )
     this.assertNoGlError('3D LUT 纹理上传失败')
     this.uploadedLutKey = lut
+    this.lutDomainMin = lut.domainMin
+    this.lutDomainMax = lut.domainMax
 
     this.currentLutSize = size
   }
@@ -395,6 +428,8 @@ export class LutRenderer {
     gl.uniform1f(this.uIntensityLocation, intensity)
     gl.uniform1i(this.uModeLocation, mode === 'professional' ? 1 : 0)
     gl.uniform1i(this.uHasLutLocation, this.lutTexture ? 1 : 0)
+    gl.uniform3fv(this.uDomainMinLocation, this.lutDomainMin)
+    gl.uniform3fv(this.uDomainMaxLocation, this.lutDomainMax)
 
     // 绘制
     gl.drawArrays(gl.TRIANGLES, 0, 6)

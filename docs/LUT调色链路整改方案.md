@@ -22,12 +22,12 @@
 | P1-1 ✅ | 🟠 | 预览每次重渲都全量重传图片纹理 | 拖浓度/切 LUT 都重传整张原图,48MP 明显卡 | upload/render 幂等,按源引用缓存 |
 | P1-2 ✅ | 🟠 | `cubeParser` 内置 LUT 生成函数是死代码 | `createWarm/Cool/Contrast/Film/Neutral/getBuiltinLuts` 零引用 | 已删除(2026-09-03) |
 | P1-3 ⏸ | 🟠 | cube 行序坑(内置 R-fastest,已核实自洽) | 行业存在 R-fastest 与 B-fastest 两派;未来换配方包会**静默整盘错色** | 决策:不开放用户导入、配方仅内置 → 不构成风险,**不实施**(见 §5) |
-| P2-1 | 🟡 | `DOMAIN_MIN/MAX` 解析后未参与计算 | 规范允许非 0..1 定义域,当前一律忽略 | 可选:查表前做 domain 归一 |
+| P2-1 ✅ | 🟡 | `DOMAIN_MIN/MAX` 解析后未参与计算 | 规范允许非 0..1 定义域,当前一律忽略 | 已落地:查表前按 domain 归一再采样,见 §6.1 |
 | P2-2 ✅ | 🟡 | Rec.709 语义与默认模式 | 原为摄像机 OETF 语义、默认 PS;按"内置配方=真 Rec.709 输入"决策修正 | 已落地:BT.1886 显示信号 γ2.4 + 默认 Rec.709,见 §6.2 |
-| P2-3 | 🟡 | 解码色彩空间差异未验证 | WebGL `texImage2D` 对带 ICC 图片的 CMS 处理各浏览器不统一 | 低成本归一:上传前先过一遍 sRGB 工作空间 canvas |
+| P2-3 ✅ | 🟡 | 解码色彩空间差异(带 ICC 图) | WebGL `texImage2D` 对带 ICC 图片的 CMS 处理各浏览器不统一 | 已落地:上传前统一经 sRGB Canvas 归一,见 §6.3 |
 
 > 其中 P1-3 与 P2-3 是"认知风险",其余是"确定性缺陷"。本文把确定缺陷按 P0/P1/P2 给完整落地方案,认知风险给出护栏方案。
-> **P0-1、P0-2、P1-1、P1-2 已于 2026-09-03 落地;P1-3 决策不实施**,见各节「实施记录」与文末「9. 变更记录」。
+> **P0-1/2、P1-1/2、P2-1/2/3 已于 2026-09-03 落地;P1-3 决策不实施**,见各节「实施记录」与文末「9. 变更记录」。
 
 ---
 
@@ -118,9 +118,9 @@ this.maxTextureSize = gl.getParameter(gl.MAX_TEXTURE_SIZE) // 通常 4096/8192/1
 
 ### 2.4 ✅ 实施记录(2026-09-03)
 
-- `lutRenderer.ts`:构造时读取 `gl.MAX_TEXTURE_SIZE` 存 `maxTextureSize`;新增 `clampSourceToMax`(上传源等比缩到上限内)、`getSafeCanvasSize`(返回安全渲染尺寸)、`assertNoGlError`(`texImage2D/3D` 后检查 `gl.getError()`,失败抛可读错误)。
+- `lutRenderer.ts`:构造时读取 `gl.MAX_TEXTURE_SIZE` 存 `maxTextureSize`;新增 `prepareUploadSource`(Canvas2D 归一 sRGB + 等比缩到上限内,后述 P2-3 亦集成于此)、`getSafeCanvasSize`(返回安全渲染尺寸)、`assertNoGlError`(`texImage2D/3D` 后检查 `gl.getError()`,失败抛可读错误)。
 - `PreviewPanel.vue`:`renderLutToOffscreen` 用 `getSafeCanvasSize` 作为渲染画布尺寸;`render` / `refreshWatermark` 回贴时 `drawImage(..., 0, 0, width, height)` 拉伸回原尺寸;超限时置 `downscaledNotice` 显示横幅。
-- `exportWithLut.ts`:离屏 canvas 改为安全尺寸渲染,再拉伸到原尺寸导出;上传仍由 `clampSourceToMax` 双保险。
+- `exportWithLut.ts`:离屏 canvas 改为安全尺寸渲染,再拉伸到原尺寸导出;上传仍由 `prepareUploadSource` 双保险(sRGB 归一 + 超限降采样)。
 - 采用**降采样渲染**路线;**分块渲染未做**(排期)。原图 ≤ 上限场景像素级行为不变。
 
 ### 3.1 现状
@@ -217,9 +217,12 @@ uploadImageIfChanged(src: HTMLImageElement | HTMLCanvasElement): boolean
 
 ## 6. P2 项(可选)
 
-### 6.1 P2-1:DOMAIN_MIN/MAX 参与计算
+### 6.1 P2-1:DOMAIN_MIN/MAX 参与计算(已落地 2026-09-03)
 
-`cubeParser.ts:49-65` 已解析并存储 domain,但渲染端 `sampleLut`(`lutRenderer.ts:105-112`)直接按 [0,1] 输入。内置文件均为 0..1,无影响。若支持他源 cube:查表前先 `(src - domainMin)/(domainMax - domainMin)` 归一,越界 clamp。属"不做也不出事,做了更规范",排期宽松时再做。
+- `lutRenderer` 新增 `u_domainMin/u_domainMax` uniform(默认 0..1),`uploadLut` 记录当前 LUT 的 domain,
+  `render` 每次写入;shader 新增 `domainMap()`:查表前 `(src - domainMin)/max(domainMax-domainMin, ε)` 归一到 [0,1] 并 clamp。
+- sRGB 直查与 Rec.709 还原两条路径都经 `domainMap` 归一后再查表。
+- 内置文件均为 0..1 → `domainMap` 为恒等,视觉零影响;将来遇到带非 0..1 domain 的 cube 也能正确渲染。
 
 ### 6.2 Rec.709 语义与默认模式(已落地 2026-09-03)
 
@@ -232,15 +235,16 @@ uploadImageIfChanged(src: HTMLImageElement | HTMLCanvasElement): boolean
 - sRGB 直查(`ps`)保留为**手动对照项**(对应 Photoshop「颜色查找」),入口在 `LutPanel` 的「sRGB 直查」。
 - 涉及文件:`lutRenderer.ts`(shader 语义 + γ 常量)、`useLut.ts` / `useWatermark.ts`(默认 mode)、`LutPanel.vue`(UI 顺序/文案)、`types/index.ts`(注释)。
 
-### 6.3 P2-3:解码色彩空间一致性验证
+### 6.3 P2-3:解码色彩空间一致性(已落地 2026-09-03)
 
-若目标是"与 PS/Lightroom 一致",最大偏差源常不是 LUT 而是 **WebGL 上传路径对带 ICC 图片的 CMS 处理在浏览器间不一致**(`texImage2D` 与 canvas `drawImage` 行为不同)。
+背景:WebGL 直接 `texImage2D(<img>)` 时,各浏览器对带 ICC 图片(Display-P3/AdobeRGB)的
+色彩管理不一致(可能拿到非 sRGB 原始值),而 Canvas2D `drawImage` 会统一归一到 sRGB 工作空间。
 
-低成本归一手段(推荐做一次验证):
-
-- 上传前先把 `<img>` 画到一个 Canvas2D(`canvas` 走浏览器 sRGB 工作空间、会做 CMS 转换),再以该 canvas 作为纹理源;
-- 用带 Display-P3 / AdobeRGB ICC 的实测图,在 Safari/Chrome 分别导出,与 PS 对照 DiffView,记录是否有系统性偏色;
-- 若确认归一有效,即把 `uploadImage` 的入参统一为"sRGB 工作空间的 canvas",消除跨浏览器差异。
+- `lutRenderer.prepareUploadSource()` 替代原 `clampSourceToMax`:上传前**始终**画进一个
+  Canvas2D(sRGB 工作空间)再以该 canvas 为纹理源,并顺带完成超限降采样(一次 draw 两件事)。
+- 效果:WebGL 采样值 = Canvas2D 预览/水印路径一致;普通 sRGB 图经此路径像素不变(视觉零影响)。
+- 遗留验证(机制已落地,仍需实样确认后关闭):用带 Display-P3 / AdobeRGB ICC 的实测图,在
+  Safari/Chrome 各导出一次,与 PS 对照 DiffView(ΔE),确认无系统性偏色。
 
 ---
 
@@ -278,3 +282,5 @@ uploadImageIfChanged(src: HTMLImageElement | HTMLCanvasElement): boolean
 | 2026-09-03 | P1-1 预览纹理上传缓存 | `uploadImage/uploadLut` 按源引用幂等 + `invalidateImage()`;拖浓度/切 LUT 不再重传整图。见 §3.4 |
 | 2026-09-03 | P1-2 清理 cubeParser 死代码 | 删除未引用的内置 LUT 生成函数,文件 255→115 行。见 §4.4 |
 | 2026-09-03 | P1-3 决策:不开放用户导入 | 配方仅内置,行序不构成风险;护栏与回归 SOP **不实施**,仅保留 R-fastest 约定说明。见 §5 |
+| 2026-09-03 | P2-3 解码色彩空间归一 | `prepareUploadSource` 统一经 sRGB Canvas2D 上传(替代 `clampSourceToMax`),一次 draw 完成 ICC 归一到 sRGB + 超限降采样。见 §6.3 |
+| 2026-09-03 | P2-1 DOMAIN_MIN/MAX 参与查表 | shader `domainMap()` 归一输入(默认 0..1 恒等),两渲染路径均生效。见 §6.1 |

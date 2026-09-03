@@ -30,6 +30,9 @@ export class LutRenderer {
   private lutTexture: WebGLTexture | null = null
   private currentLutSize = 0
   private maxTextureSize = 0
+  /** P1-1：已上传源的引用缓存——同一图片/同一 LUT 实例不重复重建纹理 */
+  private uploadedImageKey: unknown = null
+  private uploadedLutKey: unknown = null
   private uImageLocation: WebGLUniformLocation | null = null
   private uLutLocation: WebGLUniformLocation | null = null
   private uLutSizeLocation: WebGLUniformLocation | null = null
@@ -237,8 +240,13 @@ export class LutRenderer {
 
   /**
    * 上传图片到 2D 纹理（sRGB 格式）
+   *
+   * P1-1：按源对象幂等——同一 ImageItem（同一 img 引用）反复调用时跳过重建，
+   * 拖浓度/切 LUT 只改 uniform + 重绘，不再整张重传，大幅降低 48MP 图的卡顿。
+   * 切换图片时 img 引用变化，会自动真正重建。
    */
   uploadImage(img: HTMLImageElement | HTMLCanvasElement | ImageBitmap): void {
+    if (this.uploadedImageKey === img) return
     const gl = this.gl
     if (!this.imageTexture) {
       this.imageTexture = gl.createTexture()
@@ -256,6 +264,12 @@ export class LutRenderer {
     // 这里我们用普通 RGBA，因为我们的 shader 自己管理伽马
     gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, src)
     this.assertNoGlError('图片纹理上传失败（可能超出 GPU 纹理上限）')
+    this.uploadedImageKey = img
+  }
+
+  /** 强制下一次 uploadImage 真正重建（当同一 ImageItem 的像素被替换时调用） */
+  invalidateImage(): void {
+    this.uploadedImageKey = null
   }
 
   /** 若源尺寸超过 GPU 纹理上限，等比降采样到上限内并返回 canvas，否则原样返回 */
@@ -302,8 +316,12 @@ export class LutRenderer {
         this.lutTexture = null
       }
       this.currentLutSize = 0
+      this.uploadedLutKey = null
       return
     }
+
+    // P1-1：同一 LUT 实例（getLutData 有全局缓存）无需重复上传
+    if (this.uploadedLutKey === lut) return
 
     if (!this.lutTexture) {
       this.lutTexture = gl.createTexture()
@@ -333,6 +351,7 @@ export class LutRenderer {
       lut.data,
     )
     this.assertNoGlError('3D LUT 纹理上传失败')
+    this.uploadedLutKey = lut
 
     this.currentLutSize = size
   }

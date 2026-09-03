@@ -19,15 +19,15 @@
 |---|---|---|---|---|
 | P0-1 ✅ | 🔴 | WebGL2 不可用时**静默降级成原图** | 用户选了 LUT,导出/预览却拿到没调色的图,仅 `console.warn` | 禁止静默降级;LUT 面板置灰 + 导出直接报错 |
 | P0-2 ✅ | 🔴 | 超 `MAX_TEXTURE_SIZE` 时纹理上传失败被吞 | 高像素航拍/拼接图可能全黑或输出旧帧,无任何提示 | 查询上限;超限走"分块渲染"或"降采样渲染" |
-| P1-1 | 🟠 | 预览每次重渲都全量重传图片纹理 | 拖浓度/切 LUT 都重传整张原图,48MP 明显卡 | upload 与 render 分离,按 img 引用缓存 |
-| P1-2 | 🟠 | `cubeParser` 内置 LUT 生成函数是死代码 | `createWarm/Cool/Contrast/Film/Neutral/getBuiltinLuts` 零引用 | 删除,或改为 `assets/luts/builtin/*.cube` 走统一 glob |
-| P1-3 | 🟠 | cube 行序坑(内置 R-fastest,已核实自洽) | 行业存在 R-fastest 与 B-fastest 两派;未来换配方包会**静默整盘错色** | 固化自检 + 导入入口做顺序护栏(若开放导入) |
+| P1-1 ✅ | 🟠 | 预览每次重渲都全量重传图片纹理 | 拖浓度/切 LUT 都重传整张原图,48MP 明显卡 | upload/render 幂等,按源引用缓存 |
+| P1-2 ✅ | 🟠 | `cubeParser` 内置 LUT 生成函数是死代码 | `createWarm/Cool/Contrast/Film/Neutral/getBuiltinLuts` 零引用 | 已删除(2026-09-03) |
+| P1-3 ⏸ | 🟠 | cube 行序坑(内置 R-fastest,已核实自洽) | 行业存在 R-fastest 与 B-fastest 两派;未来换配方包会**静默整盘错色** | 决策:不开放用户导入、配方仅内置 → 不构成风险,**不实施**(见 §5) |
 | P2-1 | 🟡 | `DOMAIN_MIN/MAX` 解析后未参与计算 | 规范允许非 0..1 定义域,当前一律忽略 | 可选:查表前做 domain 归一 |
-| P2-2 | 🟡 | "严谨模式"注释/文案过强 | 并非真正"对齐 DaVinci Resolve";且非所有配方都期望 Rec.709 输入 | 收敛文案、明确默认即 PS 模式 |
+| P2-2 ✅ | 🟡 | Rec.709 语义与默认模式 | 原为摄像机 OETF 语义、默认 PS;按"内置配方=真 Rec.709 输入"决策修正 | 已落地:BT.1886 显示信号 γ2.4 + 默认 Rec.709,见 §6.2 |
 | P2-3 | 🟡 | 解码色彩空间差异未验证 | WebGL `texImage2D` 对带 ICC 图片的 CMS 处理各浏览器不统一 | 低成本归一:上传前先过一遍 sRGB 工作空间 canvas |
 
 > 其中 P1-3 与 P2-3 是"认知风险",其余是"确定性缺陷"。本文把确定缺陷按 P0/P1/P2 给完整落地方案,认知风险给出护栏方案。
-> **P0-1、P0-2 已于 2026-09-03 修复落地**,见各节「实施记录」与文末「9. 变更记录」。
+> **P0-1、P0-2、P1-1、P1-2 已于 2026-09-03 落地;P1-3 决策不实施**,见各节「实施记录」与文末「9. 变更记录」。
 
 ---
 
@@ -157,6 +157,13 @@ uploadImageIfChanged(src: HTMLImageElement | HTMLCanvasElement): boolean
 - 拖浓度滑块时肉眼帧率明显提升(可开 Performance 面板看 `uploadImage` 不再高频出现)。
 - 反复切图后再切回,显示内容仍正确(无旧纹理残留)。
 
+### 3.4 ✅ 实施记录(2026-09-03)
+
+- `lutRenderer.ts`:`uploadImage` / `uploadLut` 改为**按源对象幂等**——新增 `uploadedImageKey` / `uploadedLutKey` 字段,同一 `ImageItem`(同一 img 引用)或同一 LUT 实例(`getLutData` 全局缓存)反复调用时直接跳过重建;切图时引用变化自动真正重建。另新增 `invalidateImage()` 供像素被替换时强制重传。
+- `PreviewPanel.vue` 无需改动:原有每次 `render()` 调 `uploadImage` 的路径,命中幂等即跳过。
+- 与原方案差异:实现为"幂等 `uploadImage`"而非独立 `uploadImageIfChanged` 方法(语义等价、API 更小);LUT 纹理同样加了幂等缓存。
+- 验收:拖浓度滑块时帧率明显提升;切图/切回内容正确。
+
 ---
 
 ## 4. P1-2:清理 cubeParser 死代码
@@ -175,9 +182,14 @@ uploadImageIfChanged(src: HTMLImageElement | HTMLCanvasElement): boolean
 - `grep -rn "getBuiltinLuts|createWarmLut|createNeutralLut" src` 应清空(允许仅出现在文档/测试)。
 - `pnpm build` 通过(noUnusedLocals 之下,未引用的顶层导出其实不报错,故需以 grep 验收而非仅靠编译器)。
 
+### 4.4 ✅ 实施记录(2026-09-03)
+
+- `cubeParser.ts` 截断至 115 行:删除 `createNeutralLut / generateLut / createWarm/Cool/Contrast/Film / getBuiltinLuts / ColorTransform`,保留 `parseCubeFile / parseCubeFileFromFile`。已 grep 确认无残留、`pnpm build` 通过。
+- 未新增 `assets/luts/builtin/*.cube`(无内置配方需求)。
+
 ---
 
-## 5. P1-3:cube 行序坑 —— 护栏与自检(认知风险)
+## 5. P1-3:cube 行序坑 —— 护栏与自检(2026-09-03 决策:不实施)
 
 ### 5.1 背景(为什么是坑)
 
@@ -198,6 +210,8 @@ uploadImageIfChanged(src: HTMLImageElement | HTMLCanvasElement): boolean
   3. Photoshop 对同图应用同 `.cube` → 导出;
   4. DiffView 对比,ΔE 应整体极低(灰阶/红轴区域无系统性偏移)。
   - 该 SOP 同时验证"行序正确 + 渲染管线像素级对齐 PS",是当前唯一能一锤定音证明调色实现正确的证据,建议沉淀成文档或脚本。
+
+> **2026-09-03 决策:** 未来**不开放用户导入 .cube,配方仅内置**——行序一致性问题不构成实际风险,本项(含 auto 检测、UI 顺序选项)**不实施**。仅需保留认知:内置文件均为 R-fastest,配套解析器按此约定,将来若改变策略再启用护栏。
 
 ---
 
@@ -236,9 +250,9 @@ uploadImageIfChanged(src: HTMLImageElement | HTMLCanvasElement): boolean
 |---|---|---|---|
 | 1 | ✅ P0-1 WebGL2 不可用禁止静默降级(2026-09-03) | `lutRenderer.ts`、`PreviewPanel.vue`、`LutPanel.vue`、`exportWithLut.ts` | 已落地 |
 | 2 | ✅ P0-2 超纹理上限 · 降采样(2026-09-03;分块未做,排期) | `lutRenderer.ts`、`PreviewPanel.vue`、`exportWithLut.ts` | 已落地(降采样) |
-| 3 | P1-1 预览纹理上传缓存 | `lutRenderer.ts`(upload/draw 分离)、`PreviewPanel.vue` | 0.5 天 |
-| 4 | P1-2 清理死代码 | `cubeParser.ts`;可选新增 `assets/luts/builtin/*.cube` | 0.5 天 |
-| 5 | P1-3 顺序护栏 + 回归 SOP 沉淀 | `README.md`/技术方案文档;导入若开放则 `cubeParser.ts` | 文档 0.5 天 |
+| 3 | ✅ P1-1 预览纹理上传缓存(2026-09-03) | `lutRenderer.ts`(幂等 upload/uploadLut + `invalidateImage`) | 已落地 |
+| 4 | ✅ P1-2 清理 cubeParser 死代码(2026-09-03) | `cubeParser.ts` | 已落地 |
+| 5 | ⏸ P1-3 顺序护栏 + 回归 SOP(2026-09-03 决策:不开放导入) | — | 不实施 |
 | 6 | P2 项 | 按需 | 弹性 |
 
 > 前 4 项互不依赖、可按任意顺序;建议 1、2 先做(数据保真优先),3 随手,4 顺手清。
@@ -261,3 +275,6 @@ uploadImageIfChanged(src: HTMLImageElement | HTMLCanvasElement): boolean
 | 2026-09-03 | Rec.709 语义修正 + 默认切 Rec.709 | 内置配方默认按真 Rec.709(视频显示信号)输入;Rec.709 段编码改为 BT.1886 纯幂律 γ=2.4;`REC709_DISPLAY_GAMMA` 可一键切 2.2。文件:`lutRenderer.ts / useLut.ts / useWatermark.ts / LutPanel.vue / types/index.ts` |
 | 2026-09-03 | P0-1:禁止 WebGL2 缺失时静默降级 | 预览横幅 + LUT 面板置灰 + 带 LUT 导出直接报错。见 §1.5 |
 | 2026-09-03 | P0-2:超纹理上限降采样 + 上传错误暴露 | 读 `MAX_TEXTURE_SIZE`,安全尺寸渲染/降采样上传,`gl.getError` 兜底。分块渲染待排期。见 §2.4 |
+| 2026-09-03 | P1-1 预览纹理上传缓存 | `uploadImage/uploadLut` 按源引用幂等 + `invalidateImage()`;拖浓度/切 LUT 不再重传整图。见 §3.4 |
+| 2026-09-03 | P1-2 清理 cubeParser 死代码 | 删除未引用的内置 LUT 生成函数,文件 255→115 行。见 §4.4 |
+| 2026-09-03 | P1-3 决策:不开放用户导入 | 配方仅内置,行序不构成风险;护栏与回归 SOP **不实施**,仅保留 R-fastest 约定说明。见 §5 |

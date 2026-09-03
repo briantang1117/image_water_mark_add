@@ -4,6 +4,7 @@ import JSZip from 'jszip'
 import ThumbPanel from '@/components/ThumbPanel.vue'
 import PreviewPanel from '@/components/PreviewPanel.vue'
 import ControlToolbar from '@/components/ControlToolbar.vue'
+import LutPanel from '@/components/LutPanel.vue'
 import { useWatermark } from '@/composables/useWatermark'
 import { isNativeApp, isIOS, postToNative, makeOutputName, downloadBlob } from '@/utils'
 
@@ -30,6 +31,9 @@ const {
 const fileInputRef = ref<HTMLInputElement | null>(null)
 const previewRef = ref<InstanceType<typeof PreviewPanel> | null>(null)
 const isExporting = ref(false)
+
+// 当前激活的 Tab: 'watermark' | 'lut'
+const activeTab = ref<'watermark' | 'lut'>('watermark')
 
 // 渲染函数传给预览组件（使用当前图片自己的水印）
 function renderFn(
@@ -245,8 +249,8 @@ onMounted(() => {
 <template>
   <div class="container">
     <h2>
-      水印叠加工具
-      <span style="font-size: 14px; color: #999; font-weight: normal">（批量版）</span>
+      图片工具箱
+      <span style="font-size: 14px; color: #999; font-weight: normal">（水印 + LUT 调色）</span>
     </h2>
 
     <input
@@ -258,33 +262,208 @@ onMounted(() => {
       @change="handleFileChange"
     />
 
-    <ControlToolbar
-      :wm-key="currentWmKey"
-      :brand-key="currentBrandKey"
-      :params="params"
-      :has-current-image="!!currentImage"
-      :is-exporting="isExporting"
-      @update:wm-key="handleUpdateWmKey"
-      @update:brand-key="handleUpdateBrandKey"
-      @update:params="handleUpdateParams"
-      @pick="handlePick"
-      @clear="handleClear"
-      @download="handleDownload"
-      @download-all="handleDownloadAll"
-      @reset="handleReset"
-    />
+    <!-- 顶部通用工具栏 -->
+    <div class="top-toolbar">
+      <button class="primary-btn" @click="handlePick">📷 选择图片</button>
+      <button class="secondary-btn" @click="handleClear" :disabled="imageList.length === 0">
+        清空列表
+      </button>
+      <span class="top-toolbar-count">共 {{ imageList.length }} 张</span>
+    </div>
 
-    <div class="status">{{ status }}</div>
-    <div class="progress">{{ progress }}</div>
-
-    <div class="main-layout">
+    <!-- 上半部分：预览区 + 缩略图 -->
+    <div class="preview-section">
+      <PreviewPanel ref="previewRef" :current-image="currentImage" :render-fn="renderFn" />
       <ThumbPanel
         :image-list="imageList"
         :current-index="currentIndex"
         @select="selectImage"
         @remove="handleRemove"
       />
-      <PreviewPanel ref="previewRef" :current-image="currentImage" :render-fn="renderFn" />
+    </div>
+
+    <div class="status">{{ status }}</div>
+    <div class="progress">{{ progress }}</div>
+
+    <!-- 下半部分：Tab 切换面板 -->
+    <div class="bottom-section">
+      <div class="tab-bar">
+        <button
+          class="tab-item"
+          :class="{ active: activeTab === 'watermark' }"
+          @click="activeTab = 'watermark'"
+        >
+          💧 水印
+        </button>
+        <button
+          class="tab-item"
+          :class="{ active: activeTab === 'lut' }"
+          @click="activeTab = 'lut'"
+        >
+          🎨 LUT 调色
+        </button>
+      </div>
+
+      <div class="tab-content">
+        <!-- 水印面板 -->
+        <div v-show="activeTab === 'watermark'" class="tab-pane">
+          <ControlToolbar
+            :wm-key="currentWmKey"
+            :brand-key="currentBrandKey"
+            :params="params"
+            :has-current-image="!!currentImage"
+            :is-exporting="isExporting"
+            @update:wm-key="handleUpdateWmKey"
+            @update:brand-key="handleUpdateBrandKey"
+            @update:params="handleUpdateParams"
+            @download="handleDownload"
+            @download-all="handleDownloadAll"
+            @reset="handleReset"
+          />
+        </div>
+
+        <!-- LUT 面板 -->
+        <div v-show="activeTab === 'lut'" class="tab-pane">
+          <LutPanel :has-current-image="!!currentImage" />
+        </div>
+      </div>
     </div>
   </div>
 </template>
+
+<style scoped>
+/* 顶部通用工具栏 */
+.top-toolbar {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 8px;
+}
+
+.primary-btn {
+  padding: 8px 16px;
+  background: #007aff;
+  color: #fff;
+  border: none;
+  border-radius: 8px;
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.primary-btn:hover {
+  background: #0062cc;
+}
+
+.secondary-btn {
+  padding: 8px 14px;
+  background: #f0f0f0;
+  color: #333;
+  border: none;
+  border-radius: 8px;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.secondary-btn:hover {
+  background: #e0e0e0;
+}
+
+.secondary-btn:disabled {
+  background: #f5f5f5;
+  color: #ccc;
+  cursor: not-allowed;
+}
+
+.top-toolbar-count {
+  margin-left: auto;
+  font-size: 12px;
+  color: #999;
+  font-variant-numeric: tabular-nums;
+}
+
+/* 上半部分：预览区 + 缩略图列表 */
+.preview-section {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+/* 下半部分：Tab 面板容器 */
+.bottom-section {
+  flex-shrink: 0;
+  background: #fafafa;
+  border: 1px solid #eee;
+  border-radius: 10px;
+  margin-top: 8px;
+  display: flex;
+  flex-direction: column;
+  max-height: 45vh;
+  min-height: 240px;
+}
+
+/* Tab 栏 */
+.tab-bar {
+  flex-shrink: 0;
+  display: flex;
+  gap: 4px;
+  padding: 6px 8px 0 8px;
+  border-bottom: 1px solid #eee;
+  background: #fff;
+  border-radius: 10px 10px 0 0;
+}
+
+.tab-item {
+  flex: 1;
+  padding: 8px 12px;
+  background: transparent;
+  color: #666;
+  border: none;
+  border-bottom: 2px solid transparent;
+  border-radius: 6px 6px 0 0;
+  font-size: 13px;
+  cursor: pointer;
+  transition: all 0.15s;
+  font-weight: 500;
+}
+
+.tab-item:hover {
+  background: #f5f5f5;
+  color: #333;
+}
+
+.tab-item.active {
+  color: #007aff;
+  border-bottom-color: #007aff;
+  background: transparent;
+}
+
+/* Tab 内容区 */
+.tab-content {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 8px 12px 12px 12px;
+  -webkit-overflow-scrolling: touch;
+}
+
+.tab-pane {
+  width: 100%;
+}
+
+/* 移动端适配 */
+@media (max-width: 640px) {
+  .bottom-section {
+    max-height: 50vh;
+    min-height: 200px;
+  }
+
+  .tab-item {
+    padding: 6px 8px;
+    font-size: 12px;
+  }
+}
+</style>

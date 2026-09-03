@@ -1,6 +1,6 @@
-// 动态读取 src/assets/<brand>/*.png 下所有 PNG 图片作为水印选项
-// 新增品牌/水印只需在 src/assets 下新建品牌文件夹并放入 PNG，无需修改代码
-const watermarkModules = import.meta.glob('@/assets/*/*.png', {
+// 动态读取 src/assets/watermarks/<brand>/*.png 下所有 PNG 图片作为水印选项
+// 新增品牌/水印只需在 src/assets/watermarks 下新建品牌文件夹并放入 PNG，无需修改代码
+const watermarkModules = import.meta.glob('@/assets/watermarks/*/*.png', {
   eager: true,
   query: '?url',
   import: 'default',
@@ -19,7 +19,7 @@ export interface Brand {
 }
 
 // 从路径中解析品牌和文件名
-// 路径格式：/src/assets/<brand>/<name>.png
+// 路径格式：/src/assets/watermarks/<brand>/<name>.png
 function parsePath(path: string): { brandKey: string; fileName: string; label: string } {
   const parts = path.split('/')
   const fileName = (parts.pop() || path).replace(/\.[^.]+$/, '')

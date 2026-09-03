@@ -28,8 +28,6 @@ const emit = defineEmits<{
   'update:wmKey': [wmKey: string]
   'update:brandKey': [brandKey: string]
   'update:params': [params: Record<string, unknown>]
-  pick: []
-  clear: []
   download: []
   downloadAll: []
   reset: []
@@ -62,14 +60,6 @@ const isJpeg = computed(() => props.params.format === 'jpeg')
 
 <template>
   <div class="toolbar">
-    <div class="row">
-      <label>
-        选择图片：
-        <button class="secondary" @click="emit('pick')">选择多张图片</button>
-      </label>
-      <button class="secondary" @click="emit('clear')">清空列表</button>
-    </div>
-
     <div class="row">
       <label>
         品牌：

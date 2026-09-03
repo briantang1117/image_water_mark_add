@@ -71,18 +71,18 @@ src/
 
 ### LUT 渲染语义（重要，不要随手改默认）
 
-- **默认模式 = Rec.709 还原（`lutMode: 'professional'`）**。内置配方一律视为「真 Rec.709（视频显示信号）」输入——等价达芬奇「dlog → Rec.709 → 套 LUT」。不要改回 `'ps'` 为默认。
+- **默认模式 = sRGB 直查（`lutMode: 'ps'`）**，与 Photoshop「颜色查找」一致，适合多数风格化配方（尤其 PS/LR/手机生态）。不要随手改成别的默认。
 - 链路：`sRGB → srgbToLinear → E'=L^(1/γ)（Rec.709 显示信号）→ LUT 查表 → L=E'^γ → linearToSrgb`。
 - **γ 取 2.4（BT.1886 参考近似）**，常量 `REC709_DISPLAY_GAMMA`（`lutRenderer.ts` 顶部）。若目标达芬奇时间线是 Gamma 2.2，改此常量即可——用纯幂律，**不要**换回 BT.709 摄像机 OETF 分段公式（那是捕获端编码，不适用于显示图互转）。
 - 查表前输入经 `domainMap` 按 `DOMAIN_MIN/MAX` 归一到 [0,1]。
-- `'ps'` = sRGB 直查，仅作 Photoshop「颜色查找」对照项，不是主路径。
+- `'professional'` = Rec.709 还原（手动）：把 sRGB 图重编码为 Rec.709 显示信号后查表，等价达芬奇「dlog → Rec.709 → 套 LUT」，用于真 Rec.709 输入配方或 709 视频帧素材。
 
 ### Development Guardrails（防回归，务必遵守）
 
 1. **禁止静默降级**：任何"功能不可用/超限"都要对用户可见（横幅/置灰/报错）。带 LUT 导出遇 WebGL2 缺失必须抛错，不能悄悄输出原图。
 2. GPU 上传（`texImage2D/3D`）后要 `assertNoGlError`；不吞错误。
 3. 上传前检查纹理尺寸上限；不要假设图片一定 ≤ `MAX_TEXTURE_SIZE`。
-4. 单一默认来源：新建 `ImageItem` 的 `lutMode` 统一为 `'professional'`。
+4. 单一默认来源：新建 `ImageItem` 的 `lutMode` 统一为 `'ps'`。
 5. 注释不能比实现更强断言（避免"对齐 DaVinci Resolve"这类言过其实的表述）。
 6. **不开放用户导入 .cube**：配方只来自内置目录，行序 R-fastest 假设因此安全。
 

@@ -117,7 +117,7 @@ async function addFiles(fileList: FileList | File[]): Promise<void> {
         wmKey,
         lutId: '',
         lutIntensity: 100,
-        lutMode: 'professional' as const,
+        lutMode: 'ps' as const,
       })
       loaded++
       status.value = `正在加载... ${loaded}/${files.length}`
@@ -153,7 +153,7 @@ async function addImageFromDataURL(dataURL: string, fileName: string): Promise<v
       wmKey,
       lutId: '',
       lutIntensity: 100,
-      lutMode: 'professional' as const,
+      lutMode: 'ps' as const,
     })
     if (currentIndex.value < 0) {
       selectImage(0)

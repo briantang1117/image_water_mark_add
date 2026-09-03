@@ -3,9 +3,9 @@ import type { Lut3D, LutMode } from '@/types'
 /**
  * Rec.709 显示信号编码的参考伽马（BT.1886 近似）。
  *
- * 本工具内置配方一律按“真 Rec.709（视频显示信号）”输入制作——即达芬奇里把
- * dlog 素材转成 Rec.709 之后直接套的那类 LUT。把 sRGB 图喂给这类 LUT 前，
- * 必须先做一次重编码：sRGB 显示值 → 线性光 → E' = L^(1/γ)（Rec.709 显示信号）。
+ * 若配方确为“真 Rec.709（视频显示信号）”输入（影视风格 LUT——即达芬奇里把
+ * dlog 素材转成 Rec.709 之后直接套的那类），把 sRGB 图喂给它前必须先做一次重编码：
+ * sRGB 显示值 → 线性光 → E' = L^(1/γ)（Rec.709 显示信号）。
  *
  * 达芬奇默认时间线为「Rec.709 Gamma 2.4」，故取 2.4。
  * 若你的达芬奇项目把 709 当 Gamma 2.2 处理，把此常量改为 2.2 即可。
@@ -16,9 +16,9 @@ const REC709_DISPLAY_GAMMA = 2.4
  * WebGL2 3D LUT 渲染器
  *
  * 双渲染管线：
- * - Rec.709 还原模式（默认）：sRGB → 线性 → Rec.709 显示信号(BT.1886 参考) →
- *   查表 → 逆变换 → sRGB，还原达芬奇「dlog → Rec.709 → 套 LUT」的结果。
- * - sRGB 直查模式：直接查表（与 Photoshop「颜色查找」层一致），仅供 sRGB/PS 生态配方对照。
+ * - sRGB 直查（默认）：直接查表，与 Photoshop「颜色查找」层一致，适合多数风格化配方。
+ * - Rec.709 还原（可选）：sRGB → 线性 → Rec.709 显示信号(BT.1886 参考) →
+ *   查表 → 逆变换 → sRGB，还原达芬奇「dlog → Rec.709 → 套 LUT」的结果，用于真 Rec.709 输入配方。
  *
  * 利用 GPU 硬件 3D 纹理三线性插值，杜绝色彩断层。
  */
@@ -148,11 +148,11 @@ export class LutRenderer {
       vec3 lutResult;
 
       if (u_mode == 0) {
-        // ========== sRGB 直查模式（对照 PS 颜色查找） ==========
+        // ========== sRGB 直查模式（默认；对照 PS 颜色查找） ==========
         // 直接对 sRGB 编码像素查表，仅当配方确为 sRGB/PS 生态制作用。
         lutResult = sampleLut(domainMap(src));
       } else {
-        // ========== Rec.709 还原模式（默认） ==========
+        // ========== Rec.709 还原模式（可选，真 Rec.709 输入配方用） ==========
         // sRGB → 线性 → Rec.709 显示信号 → LUT → Rec.709 显示信号 → 线性 → sRGB
         // 语义等价达芬奇「dlog → Rec.709 → 套 LUT」对同一画面（Rec.709 输入配方）。
         vec3 linear = srgbToLinear(src);

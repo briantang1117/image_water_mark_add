@@ -284,3 +284,4 @@ uploadImageIfChanged(src: HTMLImageElement | HTMLCanvasElement): boolean
 | 2026-09-03 | P1-3 决策:不开放用户导入 | 配方仅内置,行序不构成风险;护栏与回归 SOP **不实施**,仅保留 R-fastest 约定说明。见 §5 |
 | 2026-09-03 | P2-3 解码色彩空间归一 | `prepareUploadSource` 统一经 sRGB Canvas2D 上传(替代 `clampSourceToMax`),一次 draw 完成 ICC 归一到 sRGB + 超限降采样。见 §6.3 |
 | 2026-09-03 | P2-1 DOMAIN_MIN/MAX 参与查表 | shader `domainMap()` 归一输入(默认 0..1 恒等),两渲染路径均生效。见 §6.1 |
+| 2026-09-03 | 默认模式回退为 sRGB 直查 | 实测多数内置配方更适合直查；`Rec.709 还原`保留为手动可选。§6.2 的“默认 Rec.709”为中间态记录,以本文档 §9 为准 |

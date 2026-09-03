@@ -118,31 +118,31 @@ function handleReset(): void {
       <div class="mode-tabs">
         <button
           class="mode-btn"
-          :class="{ active: params.mode === 'professional' }"
-          :disabled="!currentLutId || !lutSupported"
-          @click="handleModeChange('professional')"
-        >
-          Rec.709 还原
-        </button>
-        <button
-          class="mode-btn"
           :class="{ active: params.mode === 'ps' }"
           :disabled="!currentLutId || !lutSupported"
           @click="handleModeChange('ps')"
         >
           sRGB 直查
         </button>
+        <button
+          class="mode-btn"
+          :class="{ active: params.mode === 'professional' }"
+          :disabled="!currentLutId || !lutSupported"
+          @click="handleModeChange('professional')"
+        >
+          Rec.709 还原
+        </button>
       </div>
     </div>
 
     <!-- 模式说明 -->
     <div v-if="currentLutId && lutSupported" class="mode-hint">
-      <template v-if="params.mode === 'professional'">
-        💡 Rec.709 还原（默认）：图像先重编码为 Rec.709 显示信号（BT.1886，γ≈2.4）再查表，
-        等价达芬奇「dlog → Rec.709 → 套 LUT」的结果。内置配方均按 Rec.709 输入制作。
+      <template v-if="params.mode === 'ps'">
+        💡 sRGB 直查（默认）：直接对 sRGB 像素查表，同 Photoshop「颜色查找」，适合多数风格化配方。
       </template>
       <template v-else>
-        💡 sRGB 直查：直接对 sRGB 像素查表，同 Photoshop「颜色查找」；仅当配方确为 sRGB/PS 生态制作用。
+        💡 Rec.709 还原：图像先重编码为 Rec.709 显示信号（BT.1886，γ≈2.4）再查表，
+        等价达芬奇「dlog → Rec.709 → 套 LUT」的结果，用于真 Rec.709 输入配方 / 709 视频帧素材。
       </template>
     </div>
 

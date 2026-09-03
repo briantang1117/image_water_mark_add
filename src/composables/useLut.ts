@@ -74,7 +74,7 @@ export function useLut() {
 
   const mode = computed({
     get(): LutMode {
-      return currentImage.value?.lutMode ?? 'professional'
+      return currentImage.value?.lutMode ?? 'ps'
     },
     set(val: LutMode) {
       const img = currentImage.value
@@ -135,7 +135,7 @@ export function useLut() {
 
   function resetParams(): void {
     intensity.value = 100
-    mode.value = 'professional'
+    mode.value = 'ps'
   }
 
   /** 获取当前选中 LUT 的数据（懒解析） */

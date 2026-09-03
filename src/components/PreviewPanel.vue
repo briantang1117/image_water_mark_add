@@ -21,6 +21,10 @@ const showOriginal = ref(false)
 // 离屏 WebGL renderer（不直接显示，用于生成 LUT 处理后的底图）
 let lutRenderer: LutRenderer | null = null
 let webglCanvas: HTMLCanvasElement | null = null
+// 当前实际用作底图的离屏结果（WebGL LUT 帧 或 原图 canvas）。
+// 不能直接拿 webglCanvas 当底图：没跑过 WebGL 渲染时它是空画布，
+// refreshWatermark 若把它铺上屏会把原图盖掉（只剩水印）。
+let baseCanvas: HTMLCanvasElement | null = null
 // P0-1：WebGL 不可用 / P0-2：图片超限被降采样 —— 对应的提示状态
 const lutUnavailable = ref(false)
 const downscaledNotice = ref(false)
@@ -139,9 +143,10 @@ function render(): void {
       initRenderer()
     }
 
-    // 1. LUT 底图（WebGL 离屏渲染）
+    // 1. LUT 底图（WebGL 离屏渲染；无 LUT 时为原图）
     const lutCanvas = renderLutToOffscreen()
     if (lutCanvas) {
+      baseCanvas = lutCanvas
       ctx.clearRect(0, 0, width, height)
       ctx.drawImage(lutCanvas, 0, 0, width, height)
     }
@@ -164,12 +169,12 @@ function refreshWatermark(): void {
   const ctx = canvas.getContext('2d')
   if (!ctx) return
 
-  // 重画 LUT 底图
-  if (webglCanvas) {
-    ctx.clearRect(0, 0, width, height)
-    ctx.drawImage(webglCanvas, 0, 0, width, height)
+  // 底图：优先复用最近一次渲染出的底图（原图或 LUT 帧），
+  // 避免用从未绘制的空 webglCanvas 把原图盖掉（回归修复）
+  ctx.clearRect(0, 0, width, height)
+  if (baseCanvas) {
+    ctx.drawImage(baseCanvas, 0, 0, width, height)
   } else {
-    ctx.clearRect(0, 0, width, height)
     ctx.drawImage(props.currentImage.img, 0, 0)
   }
 
@@ -228,6 +233,7 @@ onBeforeUnmount(() => {
     lutRenderer = null
   }
   webglCanvas = null
+  baseCanvas = null
 })
 
 // 暴露方法给父组件

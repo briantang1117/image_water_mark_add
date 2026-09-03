@@ -21,7 +21,9 @@ const showOriginal = ref(false)
 // 离屏 WebGL renderer（不直接显示，用于生成 LUT 处理后的底图）
 let lutRenderer: LutRenderer | null = null
 let webglCanvas: HTMLCanvasElement | null = null
-let webglSupported = true
+// P0-1：WebGL 不可用 / P0-2：图片超限被降采样 —— 对应的提示状态
+const lutUnavailable = ref(false)
+const downscaledNotice = ref(false)
 
 const { params: lutParams, getCurrentLut } = useLut()
 
@@ -58,15 +60,15 @@ const exifEntries = computed(() => {
 // 初始化 WebGL 渲染器（离屏）
 function initRenderer(): void {
   if (!isWebGL2Supported()) {
-    webglSupported = false
-    console.warn('WebGL2 不支持，LUT 功能不可用')
+    lutUnavailable.value = true
+    console.warn('WebGL2 不支持，LUT 调色不可用')
     return
   }
   try {
     webglCanvas = document.createElement('canvas')
     lutRenderer = new LutRenderer(webglCanvas)
   } catch (e) {
-    webglSupported = false
+    lutUnavailable.value = true
     console.error('初始化 WebGL 渲染器失败:', e)
   }
 }
@@ -79,9 +81,13 @@ function renderLutToOffscreen(): HTMLCanvasElement | null {
   if (!props.currentImage) return null
   const { img, width, height } = props.currentImage
 
-  if (!lutRenderer || !webglSupported) {
-    // WebGL 不可用时，直接用原图
-    // 临时创建 canvas 画原图
+  const lut = getCurrentLut()
+  const needLut = !!(lut && lutParams.lutId && lutParams.intensity > 0)
+  downscaledNotice.value = false
+
+  // 无 LUT（或浓度 0）／WebGL 不可用 → 直接用原图
+  // 注意：WebGL 不可用且选了 LUT 时也走这里，但顶部横幅会明确提示“LUT 未生效”，不静默
+  if (!needLut || !lutRenderer || lutUnavailable.value) {
     const tmp = document.createElement('canvas')
     tmp.width = width
     tmp.height = height
@@ -90,14 +96,14 @@ function renderLutToOffscreen(): HTMLCanvasElement | null {
     return tmp
   }
 
-  // 上传图片 + LUT
+  const intensity = lutParams.intensity / 100
   lutRenderer.uploadImage(img)
-  const lut = getCurrentLut()
   lutRenderer.uploadLut(lut)
 
-  // 渲染
-  const intensity = lut && lutParams.lutId ? lutParams.intensity / 100 : 0
-  lutRenderer.render(width, height, intensity, lutParams.mode)
+  // P0-2：超 GPU 纹理上限时用安全尺寸渲染，回贴时由外层拉伸到原尺寸
+  const safe = lutRenderer.getSafeCanvasSize(width, height)
+  downscaledNotice.value = safe.width < width || safe.height < height
+  lutRenderer.render(safe.width, safe.height, intensity, lutParams.mode)
 
   return webglCanvas
 }
@@ -137,7 +143,7 @@ function render(): void {
     const lutCanvas = renderLutToOffscreen()
     if (lutCanvas) {
       ctx.clearRect(0, 0, width, height)
-      ctx.drawImage(lutCanvas, 0, 0)
+      ctx.drawImage(lutCanvas, 0, 0, width, height)
     }
 
     // 2. 叠加水印（Canvas2D 混合模式完全正确）
@@ -161,7 +167,7 @@ function refreshWatermark(): void {
   // 重画 LUT 底图
   if (webglCanvas) {
     ctx.clearRect(0, 0, width, height)
-    ctx.drawImage(webglCanvas, 0, 0)
+    ctx.drawImage(webglCanvas, 0, 0, width, height)
   } else {
     ctx.clearRect(0, 0, width, height)
     ctx.drawImage(props.currentImage.img, 0, 0)
@@ -262,6 +268,12 @@ defineExpose({
 
     <div class="canvas-wrap">
       <div v-if="!showCanvas" class="placeholder">请先选择图片</div>
+      <div v-if="lutUnavailable && showCanvas" class="lut-warn">
+        ⚠️ 当前浏览器不支持 WebGL2，LUT 调色不可用（下方为原图，带 LUT 导出已被阻止）
+      </div>
+      <div v-if="downscaledNotice && showCanvas" class="lut-warn">
+        ⚠️ 图片超过 GPU 纹理上限，已降采样渲染（导出效果一致）
+      </div>
       <canvas
         v-show="showCanvas"
         ref="displayCanvasRef"
@@ -401,6 +413,23 @@ defineExpose({
 .orig-toggle-btn:hover {
   background: rgba(0, 0, 0, 0.8);
   transform: scale(1.03);
+}
+
+.lut-warn {
+  position: absolute;
+  left: 50%;
+  top: 12px;
+  transform: translateX(-50%);
+  z-index: 12;
+  max-width: 90%;
+  background: rgba(255, 149, 0, 0.92);
+  color: #fff;
+  padding: 6px 12px;
+  border-radius: 16px;
+  font-size: 12px;
+  line-height: 1.4;
+  text-align: center;
+  pointer-events: none;
 }
 
 .orig-toggle-btn.active {

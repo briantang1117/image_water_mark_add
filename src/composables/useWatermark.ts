@@ -117,7 +117,7 @@ async function addFiles(fileList: FileList | File[]): Promise<void> {
         wmKey,
         lutId: '',
         lutIntensity: 100,
-        lutMode: 'ps' as const,
+        lutMode: 'professional' as const,
       })
       loaded++
       status.value = `正在加载... ${loaded}/${files.length}`

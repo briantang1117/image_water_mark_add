@@ -1,11 +1,24 @@
 import type { Lut3D, LutMode } from '@/types'
 
 /**
+ * Rec.709 显示信号编码的参考伽马（BT.1886 近似）。
+ *
+ * 本工具内置配方一律按“真 Rec.709（视频显示信号）”输入制作——即达芬奇里把
+ * dlog 素材转成 Rec.709 之后直接套的那类 LUT。把 sRGB 图喂给这类 LUT 前，
+ * 必须先做一次重编码：sRGB 显示值 → 线性光 → E' = L^(1/γ)（Rec.709 显示信号）。
+ *
+ * 达芬奇默认时间线为「Rec.709 Gamma 2.4」，故取 2.4。
+ * 若你的达芬奇项目把 709 当 Gamma 2.2 处理，把此常量改为 2.2 即可。
+ */
+const REC709_DISPLAY_GAMMA = 2.4
+
+/**
  * WebGL2 3D LUT 渲染器
  *
- * 支持双渲染管线：
- * - PS 兼容模式：sRGB 直接查表（与 Photoshop 颜色查找层一致）
- * - 严谨专业模式：sRGB ↔ Rec.709 伽马转换后查表（对齐 DaVinci Resolve）
+ * 双渲染管线：
+ * - Rec.709 还原模式（默认）：sRGB → 线性 → Rec.709 显示信号(BT.1886 参考) →
+ *   查表 → 逆变换 → sRGB，还原达芬奇「dlog → Rec.709 → 套 LUT」的结果。
+ * - sRGB 直查模式：直接查表（与 Photoshop「颜色查找」层一致），仅供 sRGB/PS 生态配方对照。
  *
  * 利用 GPU 硬件 3D 纹理三线性插值，杜绝色彩断层。
  */
@@ -16,6 +29,7 @@ export class LutRenderer {
   private imageTexture: WebGLTexture | null = null
   private lutTexture: WebGLTexture | null = null
   private currentLutSize = 0
+  private maxTextureSize = 0
   private uImageLocation: WebGLUniformLocation | null = null
   private uLutLocation: WebGLUniformLocation | null = null
   private uLutSizeLocation: WebGLUniformLocation | null = null
@@ -33,6 +47,8 @@ export class LutRenderer {
       throw new Error('当前浏览器不支持 WebGL2，无法使用 LUT 调色功能')
     }
     this.gl = gl
+    // 纹理/画布尺寸上限，用于超限图片降采样（P0-2）
+    this.maxTextureSize = gl.getParameter(gl.MAX_TEXTURE_SIZE) as number
     this.program = this.createProgram()
     this.vao = this.createFullscreenQuad()
     this.getUniformLocations()
@@ -82,22 +98,15 @@ export class LutRenderer {
       return mix(srgbHigh, srgbLow, vec3(isLow));
     }
 
-    // 线性 → Rec.709 伽马 (ITU-R BT.709 标准 OETF 分段公式)
+    // 线性光 → Rec.709 显示信号（BT.1886 参考近似：E' = L^(1/γ)）
+    // 注意：这是“显示端”编码语义，不是 BT.709 摄像机 OETF(1.099/0.45) 捕获公式。
     vec3 linearToRec709(vec3 c) {
-      vec3 v = max(c, 0.0);
-      bvec3 isLow = lessThanEqual(v, vec3(0.018));
-      vec3 low = v * 4.5;
-      vec3 high = 1.099 * pow(v, vec3(0.45)) - 0.099;
-      return mix(high, low, vec3(isLow));
+      return pow(max(c, 0.0), vec3(${1 / REC709_DISPLAY_GAMMA}));
     }
 
-    // Rec.709 伽马 → 线性 (ITU-R BT.709 标准反向分段公式)
+    // Rec.709 显示信号 → 线性光（上式的逆：L = E'^γ）
     vec3 rec709ToLinear(vec3 c) {
-      vec3 v = max(c, 0.0);
-      bvec3 isLow = lessThanEqual(v, vec3(0.081));
-      vec3 low = v / 4.5;
-      vec3 high = pow((v + 0.099) / 1.099, vec3(1.0 / 0.45));
-      return mix(high, low, vec3(isLow));
+      return pow(max(c, 0.0), vec3(${REC709_DISPLAY_GAMMA}));
     }
 
     // 从 3D LUT 采样（三线性插值由 GPU 硬件完成）
@@ -123,15 +132,16 @@ export class LutRenderer {
       vec3 lutResult;
 
       if (u_mode == 0) {
-        // ========== PS 兼容模式 ==========
-        // sRGB 直接查表（与 Photoshop 颜色查找层行为一致）
+        // ========== sRGB 直查模式（对照 PS 颜色查找） ==========
+        // 直接对 sRGB 编码像素查表，仅当配方确为 sRGB/PS 生态制作用。
         lutResult = sampleLut(clamp(src, 0.0, 1.0));
       } else {
-        // ========== 严谨专业模式 ==========
-        // sRGB → 线性 → Rec.709 伽马 → LUT → Rec.709 伽马 → 线性 → sRGB
+        // ========== Rec.709 还原模式（默认） ==========
+        // sRGB → 线性 → Rec.709 显示信号 → LUT → Rec.709 显示信号 → 线性 → sRGB
+        // 语义等价达芬奇「dlog → Rec.709 → 套 LUT」对同一画面（Rec.709 输入配方）。
         vec3 linear = srgbToLinear(src);
-        vec3 rec709Gamma = linearToRec709(linear);
-        vec3 lutOut = sampleLut(clamp(rec709Gamma, 0.0, 1.0));
+        vec3 rec709Sig = linearToRec709(linear);
+        vec3 lutOut = sampleLut(clamp(rec709Sig, 0.0, 1.0));
         vec3 lutLinear = rec709ToLinear(lutOut);
         lutResult = linearToSrgb(lutLinear);
       }
@@ -240,9 +250,45 @@ export class LutRenderer {
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR)
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR)
 
+    // 超纹理上限保护：等比缩到 ≤ maxTextureSize 再上传，避免 texImage2D 静默失败（黑图/旧帧）
+    const src = this.clampSourceToMax(img)
     // 用 SRGB8_ALPHA8 内部格式，让 shader 中采样的值就是 sRGB 编码的
     // 这里我们用普通 RGBA，因为我们的 shader 自己管理伽马
-    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, img)
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, src)
+    this.assertNoGlError('图片纹理上传失败（可能超出 GPU 纹理上限）')
+  }
+
+  /** 若源尺寸超过 GPU 纹理上限，等比降采样到上限内并返回 canvas，否则原样返回 */
+  private clampSourceToMax(
+    src: HTMLImageElement | HTMLCanvasElement | ImageBitmap,
+  ): HTMLImageElement | HTMLCanvasElement | ImageBitmap {
+    if (src.width <= this.maxTextureSize && src.height <= this.maxTextureSize) return src
+    const scale = Math.min(this.maxTextureSize / src.width, this.maxTextureSize / src.height)
+    const c = document.createElement('canvas')
+    c.width = Math.max(1, Math.round(src.width * scale))
+    c.height = Math.max(1, Math.round(src.height * scale))
+    const ctx = c.getContext('2d')
+    if (!ctx) return src
+    ctx.drawImage(src, 0, 0, c.width, c.height)
+    return c
+  }
+
+  /** 把宽高等比缩到 GPU 纹理/画布上限内（用于确定离屏渲染画布的安全尺寸） */
+  getSafeCanvasSize(width: number, height: number): { width: number; height: number } {
+    const max = this.maxTextureSize
+    if (width <= max && height <= max) return { width, height }
+    const scale = Math.min(max / width, max / height)
+    return {
+      width: Math.max(1, Math.round(width * scale)),
+      height: Math.max(1, Math.round(height * scale)),
+    }
+  }
+
+  private assertNoGlError(context: string): void {
+    const err = this.gl.getError()
+    if (err !== this.gl.NO_ERROR) {
+      throw new Error(`${context}（WebGL error 0x${err.toString(16)}）`)
+    }
   }
 
   /**
@@ -286,6 +332,7 @@ export class LutRenderer {
       gl.FLOAT,
       lut.data,
     )
+    this.assertNoGlError('3D LUT 纹理上传失败')
 
     this.currentLutSize = size
   }
@@ -348,15 +395,20 @@ export class LutRenderer {
   }
 }
 
+let _webgl2Supported: boolean | null = null
+
 /**
- * 检测当前环境是否支持 WebGL2
+ * 检测当前环境是否支持 WebGL2（结果缓存）
+ * 避免每次导出/预览都新建 WebGL 上下文（Safari 等对活跃/历史 context 数量有限制）
  */
 export function isWebGL2Supported(): boolean {
-  try {
-    const canvas = document.createElement('canvas')
-    const gl = canvas.getContext('webgl2')
-    return !!gl
-  } catch {
-    return false
+  if (_webgl2Supported === null) {
+    try {
+      const canvas = document.createElement('canvas')
+      _webgl2Supported = !!canvas.getContext('webgl2')
+    } catch {
+      _webgl2Supported = false
+    }
   }
+  return _webgl2Supported
 }

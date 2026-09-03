@@ -88,7 +88,11 @@ export interface Lut3D {
   data: Float32Array
 }
 
-/** LUT 渲染模式 */
+/**
+ * LUT 渲染模式
+ * - professional：Rec.709 还原模式（默认）——把 sRGB 图重编码为 Rec.709 显示信号(BT.1886 γ≈2.4)后查表
+ * - ps：sRGB 直查（对照 Photoshop「颜色查找」）
+ */
 export type LutMode = 'ps' | 'professional'
 
 /** LUT 面板参数 */
@@ -97,6 +101,6 @@ export interface LutParams {
   lutId: string
   /** 浓度 0~100 */
   intensity: number
-  /** 渲染模式：PS兼容 / 严谨专业 */
+  /** 渲染模式：Rec.709 还原(默认) / sRGB 直查 */
   mode: LutMode
 }

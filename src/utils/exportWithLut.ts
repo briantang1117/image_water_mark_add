@@ -66,21 +66,27 @@ export async function exportComposedBlob(opts: ExportOptions): Promise<{ blob: B
   // === 第一步：WebGL 渲染 LUT 效果 ===
   let lutCanvas: HTMLCanvasElement
 
-  if (lut && intensity > 0 && isWebGL2Supported()) {
+  if (lut && intensity > 0) {
+    // P0-1：不允许“选了 LUT 却静默导出原图”——能力缺失时明确抛错，由调用方展示给用户
+    if (!isWebGL2Supported()) {
+      throw new Error('LUT 调色需要 WebGL2，当前浏览器不支持；请使用新版浏览器，或先移除 LUT 再导出')
+    }
     const glCanvas = document.createElement('canvas')
-    glCanvas.width = w
-    glCanvas.height = h
     const renderer = new LutRenderer(glCanvas)
     try {
+      // P0-2：超 GPU 纹理上限时用安全尺寸渲染（等比缩到上限内），回贴时拉伸回原尺寸
+      const safe = renderer.getSafeCanvasSize(w, h)
+      glCanvas.width = safe.width
+      glCanvas.height = safe.height
       renderer.uploadImage(img)
       renderer.uploadLut(lut)
-      renderer.render(w, h, intensity, lutMode)
+      renderer.render(safe.width, safe.height, intensity, lutMode)
       lutCanvas = glCanvas
     } finally {
       renderer.destroy()
     }
   } else {
-    // 无 LUT 或 WebGL 不可用，直接用原图
+    // 无 LUT 或强度为 0：直接用原图
     const tmp = document.createElement('canvas')
     tmp.width = w
     tmp.height = h
@@ -101,8 +107,8 @@ export async function exportComposedBlob(opts: ExportOptions): Promise<{ blob: B
     ctx.fillRect(0, 0, w, h)
   }
 
-  // 画 LUT 后的底图
-  ctx.drawImage(lutCanvas, 0, 0)
+  // 画 LUT 后的底图（lutCanvas 可能因超限为缩小尺寸，这里拉伸到原尺寸）
+  ctx.drawImage(lutCanvas, 0, 0, w, h)
 
   // 画水印
   if (watermarkImg) {

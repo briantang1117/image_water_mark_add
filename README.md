@@ -5,6 +5,7 @@
 ## 功能特性
 
 - 🖼️ **批量处理**：一次选择多张图片，批量加 LUT + 水印并打包 ZIP
+- 📱 **HEIC/HEIF 支持**：iPhone 等设备导出的 HEIC/HEIF 上传时自动无损转换为 PNG（转换失败会提示并跳过，不静默降级）
 - 🎨 **LUT 调色**：内置多套风格配方（人像 / 日系 / 扫街 / 大师），浓度可调；默认 **sRGB 直查**（同 Photoshop「颜色查找」），另提供 Rec.709 还原（供影视 709 输入配方）
 - 💧 **多种水印**：内置多种相机/机型水印（横/竖屏），每张图可独立配置
 - 🎭 **混合模式**：Screen 滤色、Lighten 增亮、Soft-Light 柔光、Multiply 正片叠底、正常叠加
@@ -23,6 +24,7 @@
 - **vue-router** - 主界面 + 校验工具视图
 - **ESLint** + **Prettier** - 代码规范与格式化
 - **JSZip** - 批量导出 ZIP 压缩包
+- **heic-to** - HEIC/HEIF 浏览器端解码（libheif 1.22.2 wasm，动态加载）
 - **pnpm** - 包管理器
 
 ## 快速开始
@@ -116,6 +118,7 @@ dji-water/
 │   │   ├── cubeParser.ts          # .cube 解析
 │   │   ├── lutRenderer.ts         # WebGL2 3D LUT 渲染器
 │   │   ├── exportWithLut.ts       # LUT + 水印 合成导出
+│   │   ├── heicConvert.ts         # HEIC/HEIF → PNG 转换（一对一）
 │   │   └── colorDiff.ts           # CIEDE2000（差分工具用）
 │   ├── views/
 │   │   ├── HomeView.vue           # 主界面

@@ -8,6 +8,7 @@ import {
   loadImageFromFile,
   loadWatermark,
 } from '@/utils'
+import { isHeicFile, heicToPng } from '@/utils/heicConvert'
 import {
   DEFAULT_PARAMS,
   WATERMARK_SOURCES,
@@ -98,7 +99,7 @@ async function preloadWatermarks(): Promise<void> {
 
 // 添加多张图片
 async function addFiles(fileList: FileList | File[]): Promise<void> {
-  const files = Array.from(fileList).filter((f) => f.type.startsWith('image/'))
+  const files = Array.from(fileList).filter((f) => f.type.startsWith('image/') || isHeicFile(f))
   if (!files.length) return
 
   // 9 张硬上限：只取还能容纳的数量
@@ -118,9 +119,21 @@ async function addFiles(fileList: FileList | File[]): Promise<void> {
 
   let loaded = 0
   for (const file of accepted) {
+    // HEIC/HEIF 先转 PNG；转换失败提示并跳过，不入列表
+    let fileToLoad = file
+    if (isHeicFile(file)) {
+      try {
+        fileToLoad = await heicToPng(file)
+      } catch (e) {
+        console.error('HEIC 转换失败:', file.name, e)
+        alert(`「${file.name}」转换失败，已跳过`)
+        continue
+      }
+    }
+
     try {
       const { img, thumbDataURL, name, width, height, exif, originalBuffer } =
-        await loadImageFromFile(file)
+        await loadImageFromFile(fileToLoad)
 
       const wmKey = autoDetectWatermark(exif, width, height)
 

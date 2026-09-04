@@ -19,6 +19,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - **WebGL2** — LUT 渲染（GPU 3D 纹理三线性插值）
 - **vue-router** — 主界面 HomeView + 校验工具视图（DiffView / TestPatternView）
 - **JSZip** — Batch ZIP export（npm 依赖）
+- **heic-to** — HEIC/HEIF 浏览器端解码（libheif 1.22.2 wasm，动态 import 按需加载）
 - **ESLint + Prettier** — Code quality
 
 ### Directory Layout
@@ -50,6 +51,7 @@ src/
 │   ├── cubeParser.ts        # .cube 解析（R-fastest 约定）→ Lut3D
 │   ├── lutRenderer.ts       # WebGL2 3D LUT 渲染器 + 能力检测
 │   ├── exportWithLut.ts     # LUT+水印 合成导出 Blob（含 EXIF 回写）
+│   ├── heicConvert.ts       # HEIC/HEIF → PNG 转换（一对一，动态加载 heic-to）
 │   └── colorDiff.ts         # sRGB→Lab、CIEDE2000、伪彩（供 DiffView）
 └── views/
     ├── HomeView.vue         # 主界面（上 50% 预览+缩略图；下 50% 三步工作区：调色/水印/导出）
@@ -68,6 +70,7 @@ src/
   - 双渲染模式由 `mode` 控制（见下方"渲染语义"）。
   - `getSafeCanvasSize` 供预览/导出用安全尺寸渲染，回贴时由 2D 层拉伸回原尺寸。
 - **`exportWithLut.ts`** — 合成导出。渲染顺序：原图 → LUT（WebGL2）→ 水印（Canvas2D，不参与调色）→ JPG 写回 EXIF。**带 LUT 而浏览器不支持 WebGL2 时直接 throw**（不允许静默导出原图）。
+- **`heicConvert.ts`** — HEIC/HEIF 上传前**无损转 PNG**（`isHeicFile` 判断 + `heicToPng` 一对一转换）。依赖 `heic-to`（libheif 1.22.2，动态 import 不入主 bundle）。转换失败**抛异常**，由 `useWatermark.ts` 捕获后 alert 并跳过该文件（不做静默降级，不返回原文件）。注意：heic-to 只转像素不保留 EXIF；libheif 输出为 8-bit，10-bit/HDR HEIC 的高动态范围无法无损保留。
 - **原生 bridge / 移动端** — `isNativeApp()` / `postToNative()` / `window.__onImagePicked`；移动端 safe-area + `100dvh`。
 
 ### LUT 渲染语义（重要，不要随手改默认）

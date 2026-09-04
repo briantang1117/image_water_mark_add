@@ -14,12 +14,15 @@ export interface ExifInfo {
 export interface ImageItem {
   id: number
   name: string
-  img: HTMLImageElement
+  /** 全分辨率压缩源（JPEG/PNG Blob），导出时按需解码；不常驻解码位图 */
+  pixelBlob: Blob
+  /** 预览降采样图（长边 2048px，常驻，用于预览画布 + LUT 预览渲染） */
+  previewImg: HTMLImageElement
   thumbDataURL: string
   width: number
   height: number
   exif?: ExifInfo
-  /** 原始文件 ArrayBuffer（用于导出时写回 EXIF），仅 JPEG 有效 */
+  /** 原始文件 ArrayBuffer（JPEG 或 HEIC），用于导出时写回 EXIF */
   originalBuffer?: ArrayBuffer
   /** 该图片使用的水印 key（空字符串表示无水印） */
   wmKey: string

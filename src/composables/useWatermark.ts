@@ -10,7 +10,7 @@ import {
   loadWatermark,
   parseExifFromTiff,
 } from '@/utils'
-import { isHeicFile, heicToPng } from '@/utils/heicConvert'
+import { isHeicFile, heicToJpg } from '@/utils/heicConvert'
 import {
   DEFAULT_PARAMS,
   WATERMARK_SOURCES,
@@ -121,7 +121,7 @@ async function addFiles(fileList: FileList | File[]): Promise<void> {
 
   let loaded = 0
   for (const file of accepted) {
-    // HEIC/HEIF 先转 PNG；转换失败提示并跳过，不入列表
+    // HEIC/HEIF 先转高质量 JPEG；转换失败提示并跳过，不入列表
     let fileToLoad = file
     let heicExif: Awaited<ReturnType<typeof parseExifFromTiff>> = undefined
     let heicOriginalBuffer: ArrayBuffer | undefined = undefined
@@ -137,8 +137,8 @@ async function addFiles(fileList: FileList | File[]): Promise<void> {
           const tiffBuffer = new Uint8Array(tiffData).buffer
           heicExif = await parseExifFromTiff(tiffBuffer)
         }
-        // 再转 PNG 用于加载像素
-        fileToLoad = await heicToPng(file)
+        // 再转高质量 JPEG 用于加载像素（也是导出源）
+        fileToLoad = await heicToJpg(file)
       } catch (e) {
         console.error('HEIC 转换失败:', file.name, e)
         alert(`「${file.name}」转换失败，已跳过`)
@@ -147,10 +147,10 @@ async function addFiles(fileList: FileList | File[]): Promise<void> {
     }
 
     try {
-      const { img, thumbDataURL, width, height, exif, originalBuffer } =
+      const { pixelBlob, previewImg, thumbDataURL, width, height, exif, originalBuffer } =
         await loadImageFromFile(fileToLoad)
 
-      // HEIC 场景：用原始 HEIC 的 EXIF 覆盖（PNG 无 EXIF）
+      // HEIC 场景：用原始 HEIC 的 EXIF 覆盖（JPEG 转换产物不带原始 EXIF）
       const finalExif = heicExif ?? exif
       const finalOriginalBuffer = heicOriginalBuffer ?? originalBuffer
 
@@ -159,7 +159,8 @@ async function addFiles(fileList: FileList | File[]): Promise<void> {
       imageList.value.push({
         id: nextId++,
         name: file.name.replace(/\.heic$/i, '.jpg').replace(/\.heif$/i, '.jpg'),
-        img,
+        pixelBlob,
+        previewImg,
         thumbDataURL,
         width,
         height,
@@ -191,7 +192,7 @@ async function addImageFromDataURL(dataURL: string, fileName: string): Promise<v
     return
   }
   try {
-    const { img, thumbDataURL, name, width, height, exif, originalBuffer } =
+    const { pixelBlob, previewImg, thumbDataURL, name, width, height, exif, originalBuffer } =
       await loadImageFromDataURL(dataURL, fileName)
 
     const wmKey = autoDetectWatermark(exif, width, height)
@@ -199,7 +200,8 @@ async function addImageFromDataURL(dataURL: string, fileName: string): Promise<v
     imageList.value.push({
       id: nextId++,
       name,
-      img,
+      pixelBlob,
+      previewImg,
       thumbDataURL,
       width,
       height,

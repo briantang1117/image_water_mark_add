@@ -66,7 +66,7 @@ export async function exportComposedBlob(
   const h = img.height
 
   // === 第一步：WebGL 渲染 LUT 效果 ===
-  let lutCanvas: HTMLCanvasElement
+  let lutCanvas: HTMLCanvasElement | null = null
 
   if (lut && intensity > 0) {
     // P0-1：不允许“选了 LUT 却静默导出原图”——能力缺失时明确抛错，由调用方展示给用户
@@ -100,7 +100,7 @@ export async function exportComposedBlob(
   }
 
   // === 第二步：Canvas2D 叠加水印 ===
-  const outCanvas = document.createElement('canvas')
+  let outCanvas: HTMLCanvasElement | null = document.createElement('canvas')
   outCanvas.width = w
   outCanvas.height = h
   const ctx = outCanvas.getContext('2d')!
@@ -112,7 +112,7 @@ export async function exportComposedBlob(
   }
 
   // 画 LUT 后的底图（lutCanvas 可能因超限为缩小尺寸，这里拉伸到原尺寸）
-  ctx.drawImage(lutCanvas, 0, 0, w, h)
+  ctx.drawImage(lutCanvas!, 0, 0, w, h)
 
   // 画水印
   if (watermarkImg) {
@@ -128,16 +128,25 @@ export async function exportComposedBlob(
   // === 第三步：导出为 Blob ===
   const mimeType = format === 'png' ? 'image/png' : 'image/jpeg'
   const blob = await new Promise<Blob>((resolve, reject) => {
-    outCanvas.toBlob(
+    outCanvas!.toBlob(
       (b) => (b ? resolve(b) : reject(new Error('canvas toBlob 失败'))),
       mimeType,
       format === 'jpeg' ? quality : undefined,
     )
   })
 
+  // 立即释放大画布内存（toBlob 已完成，不再需要像素数据）
+  // 主动置 width=0 触发 GPU/CPU 内存立即回收，不等 GC
+  outCanvas!.width = 0
+  outCanvas!.height = 0
+  outCanvas = null
+  lutCanvas!.width = 0
+  lutCanvas!.height = 0
+  lutCanvas = null
+
   const ext = format === 'png' ? 'png' : 'jpg'
 
-  // 写回 EXIF：JPEG 走 APP1，PNG 走 eXIf chunk
+  // 写回 EXIF：JPEG 走 APP1，PNG 走 eXIf chunk（零拷贝 Blob 拼接，不复制像素）
   if (originalBuffer) {
     if (format === 'jpeg') {
       const finalBlob = await injectExifToJpeg(blob, originalBuffer)

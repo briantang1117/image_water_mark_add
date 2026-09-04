@@ -60,10 +60,122 @@ export function postToNative(action: string, payload: Record<string, unknown> = 
 }
 
 /**
- * 从 file 加载图片，返回 { img, thumbDataURL, name, width, height, exif, originalBuffer }
+ * 生成预览用降采样图（长边 2048px，白底非 alpha）
+ * 用于 PreviewPanel 显示 + LUT 预览渲染，大幅降低常驻内存
+ * 无论原图大小一律拍平白底、返回新 Image，彻底不保留透明通道
+ */
+export async function makePreviewImg(
+  img: HTMLImageElement | HTMLCanvasElement,
+  maxLongEdge = 2048,
+): Promise<HTMLImageElement> {
+  const longEdge = Math.max(img.width, img.height)
+  const scale = Math.min(1, maxLongEdge / longEdge)
+  const pw = Math.max(1, Math.round(img.width * scale))
+  const ph = Math.max(1, Math.round(img.height * scale))
+
+  const canvas = document.createElement('canvas')
+  canvas.width = pw
+  canvas.height = ph
+  const ctx = canvas.getContext('2d')
+  if (!ctx) throw new Error('无法创建 canvas 上下文')
+  // 白底：统一非 alpha（PNG 透明区域拍平成白，与导出 JPEG 铺白底一致）
+  ctx.fillStyle = '#ffffff'
+  ctx.fillRect(0, 0, pw, ph)
+  ctx.imageSmoothingEnabled = true
+  ctx.imageSmoothingQuality = 'high'
+  ctx.drawImage(img, 0, 0, pw, ph)
+
+  const preview = new Image()
+  await new Promise<void>((resolve, reject) => {
+    // objectURL 而非 dataURL：避免 base64 字符串常驻在 Image.src 上
+    canvas.toBlob(
+      (blob) => {
+        if (!blob) {
+          reject(new Error('生成预览图失败'))
+          return
+        }
+        const url = URL.createObjectURL(blob)
+        preview.onload = () => {
+          URL.revokeObjectURL(url)
+          resolve()
+        }
+        preview.onerror = (e) => {
+          URL.revokeObjectURL(url)
+          reject(e)
+        }
+        preview.src = url
+      },
+      'image/jpeg',
+      0.92,
+    )
+  })
+  return preview
+}
+
+/**
+ * 将图片拍平到白底，返回非 alpha 的 canvas（本工具不保留透明通道）
+ */
+export function flattenToWhite(img: HTMLImageElement): HTMLCanvasElement {
+  const canvas = document.createElement('canvas')
+  canvas.width = img.width
+  canvas.height = img.height
+  const ctx = canvas.getContext('2d')
+  if (!ctx) throw new Error('无法创建 canvas 上下文')
+  ctx.fillStyle = '#ffffff'
+  ctx.fillRect(0, 0, canvas.width, canvas.height)
+  ctx.drawImage(img, 0, 0)
+  return canvas
+}
+
+/**
+ * canvas → 高质量 JPEG Blob（quality 0.95，视觉无损）
+ */
+export function canvasToJpegBlob(canvas: HTMLCanvasElement, quality = 0.95): Promise<Blob> {
+  return new Promise((resolve, reject) => {
+    canvas.toBlob(
+      (b) => (b ? resolve(b) : reject(new Error('canvas toBlob 失败'))),
+      'image/jpeg',
+      quality,
+    )
+  })
+}
+
+/**
+ * 从压缩 Blob 按需解码全分辨率原图（仅导出时调用，用完调用方应释放）
+ * 用 objectURL 而非 dataURL，避免 base64 字符串常驻内存
+ */
+export function loadImageFromBlob(blob: Blob): Promise<HTMLImageElement> {
+  return new Promise((resolve, reject) => {
+    const url = URL.createObjectURL(blob)
+    const img = new Image()
+    img.onload = () => {
+      URL.revokeObjectURL(url)
+      resolve(img)
+    }
+    img.onerror = (e) => {
+      URL.revokeObjectURL(url)
+      reject(e)
+    }
+    img.src = url
+  })
+}
+
+/**
+ * 释放解码位图（把 Image 的解码像素从内存中赶出去）
+ */
+export function releaseImage(img: HTMLImageElement): void {
+  img.src = ''
+  img.onload = null
+  img.onerror = null
+}
+
+/**
+ * 从 file 加载图片，返回 { pixelBlob, previewImg, thumbDataURL, name, width, height, exif, originalBuffer }
+ * 不再常驻全分辨率解码位图：pixelBlob 是压缩源（~10-20MB），导出时再 decodeFullImage 按需解码
  */
 export async function loadImageFromFile(file: File): Promise<{
-  img: HTMLImageElement
+  pixelBlob: Blob
+  previewImg: HTMLImageElement
   thumbDataURL: string
   name: string
   width: number
@@ -107,12 +219,33 @@ export async function loadImageFromFile(file: File): Promise<{
   const dh = img.height * ratio
   tctx.drawImage(img, (tw - dw) / 2, (th - dh) / 2, dw, dh)
 
+  // 生成预览降采样图
+  const previewImg = await makePreviewImg(img)
+
+  const w = img.width
+  const h = img.height
+  const isPng =
+    file.type === 'image/png' || /\.png$/i.test(file.name)
+
+  // PNG 一律拍平 alpha 到白底并转 JPEG 作为导出源（不保留透明通道，体积也更小）
+  // JPEG 输入直接复用原文件（本身无 alpha，避免二次有损压缩）
+  let pixelBlob: Blob
+  if (isPng) {
+    pixelBlob = await canvasToJpegBlob(flattenToWhite(img))
+  } else {
+    pixelBlob = file
+  }
+
+  // 生成完毕后立即释放临时全分辨率位图，只保留压缩源 pixelBlob 与独立预览图
+  releaseImage(img)
+
   return {
-    img,
+    pixelBlob,
+    previewImg,
     thumbDataURL: thumbCanvas.toDataURL('image/jpeg', 0.7),
     name: file.name,
-    width: img.width,
-    height: img.height,
+    width: w,
+    height: h,
     exif,
     originalBuffer,
   }
@@ -125,7 +258,8 @@ export async function loadImageFromDataURL(
   dataURL: string,
   fileName: string,
 ): Promise<{
-  img: HTMLImageElement
+  pixelBlob: Blob
+  previewImg: HTMLImageElement
   thumbDataURL: string
   name: string
   width: number
@@ -168,12 +302,31 @@ export async function loadImageFromDataURL(
   const dh = img.height * ratio
   tctx.drawImage(img, (tw - dw) / 2, (th - dh) / 2, dw, dh)
 
+  // 生成预览降采样图
+  const previewImg = await makePreviewImg(img)
+
+  const w = img.width
+  const h = img.height
+  const isPng = /^data:image\/png/i.test(dataURL)
+
+  // PNG 一律拍平 alpha 到白底并转 JPEG 作为导出源（不保留透明通道）
+  let pixelBlob: Blob
+  if (isPng) {
+    pixelBlob = await canvasToJpegBlob(flattenToWhite(img))
+  } else {
+    pixelBlob = dataURLtoBlob(dataURL)
+  }
+
+  // 生成完毕后立即释放临时全分辨率位图，只保留压缩源 pixelBlob 与独立预览图
+  releaseImage(img)
+
   return {
-    img,
+    pixelBlob,
+    previewImg,
     thumbDataURL: thumbCanvas.toDataURL('image/jpeg', 0.7),
     name: fileName,
-    width: img.width,
-    height: img.height,
+    width: w,
+    height: h,
     exif,
     originalBuffer,
   }
@@ -703,35 +856,33 @@ export function injectExifToJpeg(
       return
     }
 
+    // 只读取前 32 字节用于定位插入点，避免把整张图读进内存
+    const headSize = Math.min(newJpegBlob.size, 32)
     const reader = new FileReader()
     reader.onload = () => {
-      const newBytes = new Uint8Array(reader.result as ArrayBuffer)
+      const head = new Uint8Array(reader.result as ArrayBuffer)
       // 验证新文件也是 JPEG
-      if (newBytes.length < 4 || newBytes[0] !== 0xff || newBytes[1] !== 0xd8) {
+      if (head.length < 4 || head[0] !== 0xff || head[1] !== 0xd8) {
         resolve(newJpegBlob)
         return
       }
 
       // 找到 SOI 之后第一个 marker 的起始位置（通常是 FF E0 / APP0）
       let insertAt = 2 // 紧跟 SOI 之后
-      if (newBytes[2] === 0xff && newBytes[3] === 0xe0) {
+      if (head[2] === 0xff && head[3] === 0xe0) {
         // 存在 APP0 (JFIF)，跳过它
-        const app0Len = (newBytes[4] << 8) | newBytes[5]
+        const app0Len = (head[4] << 8) | head[5]
         insertAt = 2 + 2 + app0Len // SOI(2) + FF E0(2) + 长度字段后的数据
       }
 
-      // 组装：SOI + [APP0] + APP1(EXIF) + 剩余部分
-      const before = newBytes.slice(0, insertAt)
-      const after = newBytes.slice(insertAt)
-      const result = new Uint8Array(before.length + app1.length + after.length)
-      result.set(before, 0)
-      result.set(app1, before.length)
-      result.set(after, before.length + app1.length)
-
-      resolve(new Blob([result], { type: 'image/jpeg' }))
+      // 零拷贝组装：Blob 底层直接引用原始 buffer 切片，不做像素级全量复制
+      const before = newJpegBlob.slice(0, insertAt, 'image/jpeg')
+      const after = newJpegBlob.slice(insertAt, newJpegBlob.size, 'image/jpeg')
+      const finalBlob = new Blob([before, app1, after], { type: 'image/jpeg' })
+      resolve(finalBlob)
     }
     reader.onerror = () => resolve(newJpegBlob)
-    reader.readAsArrayBuffer(newJpegBlob)
+    reader.readAsArrayBuffer(newJpegBlob.slice(0, headSize))
   })
 }
 
@@ -804,33 +955,31 @@ export function injectExifToPng(
 
     const exifChunk = buildExifChunk(tiffData)
 
+    // 只读取前 32 字节用于定位 IHDR 结束位置，避免把整张图读进内存
+    const headSize = Math.min(newPngBlob.size, 32)
     const reader = new FileReader()
     reader.onload = () => {
-      const newBytes = new Uint8Array(reader.result as ArrayBuffer)
+      const head = new Uint8Array(reader.result as ArrayBuffer)
       // PNG 签名：89 50 4E 47 0D 0A 1A 0A
       const PNG_SIGN = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]
-      if (newBytes.length < 8 + 8 || !PNG_SIGN.every((b, i) => newBytes[i] === b)) {
+      if (head.length < 8 + 8 || !PNG_SIGN.every((b, i) => head[i] === b)) {
         resolve(newPngBlob)
         return
       }
 
       // 定位首个 chunk（IHDR）的结束位置：签名(8) + length(4) + type(4) + data + crc(4)
       const ihdrLen =
-        ((newBytes[8] << 24) | (newBytes[9] << 16) | (newBytes[10] << 8) | newBytes[11]) >>> 0
+        ((head[8] << 24) | (head[9] << 16) | (head[10] << 8) | head[11]) >>> 0
       const insertAt = 8 + 4 + 4 + ihdrLen + 4 // 签名 + length + type + data + crc
 
-      // 组装：签名 + IHDR + eXIf + 剩余（IDAT/IEND...）
-      const before = newBytes.slice(0, insertAt)
-      const after = newBytes.slice(insertAt)
-      const result = new Uint8Array(before.length + exifChunk.length + after.length)
-      result.set(before, 0)
-      result.set(exifChunk, before.length)
-      result.set(after, before.length + exifChunk.length)
-
-      resolve(new Blob([result], { type: 'image/png' }))
+      // 零拷贝组装：Blob 底层直接引用原始 buffer 切片，不做像素级全量复制
+      const before = newPngBlob.slice(0, insertAt, 'image/png')
+      const after = newPngBlob.slice(insertAt, newPngBlob.size, 'image/png')
+      const finalBlob = new Blob([before, exifChunk, after], { type: 'image/png' })
+      resolve(finalBlob)
     }
     reader.onerror = () => resolve(newPngBlob)
-    reader.readAsArrayBuffer(newPngBlob)
+    reader.readAsArrayBuffer(newPngBlob.slice(0, headSize))
   })
 }
 

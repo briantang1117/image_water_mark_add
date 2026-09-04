@@ -2,7 +2,7 @@
 
 ## 背景
 
-HEIC/HEIF 是 iPhone 等设备默认的拍摄格式，基于 ISO BMFF（Base Media File Format）容器，与 JPEG 的 EXIF 存储方式完全不同。本工具在上传图片时会把 HEIC 无损转成 PNG 用于像素加载（`heic-to` / libheif 只转像素、**不保留 EXIF**），导致：
+HEIC/HEIF 是 iPhone 等设备默认的拍摄格式，基于 ISO BMFF（Base Media File Format）容器，与 JPEG 的 EXIF 存储方式完全不同。本工具在上传图片时会把 HEIC 转成高质量 JPEG 用于像素加载（`heic-to` / libheif 只转像素、**不保留 EXIF**），导致：
 
 1. **显示环节**：信息栏读不到相机型号、拍摄时间、GPS 等 EXIF。
 2. **导出环节**：导出 JPEG 时无法写回原始 EXIF，拍摄时间/机型信息丢失。
@@ -83,7 +83,7 @@ item_count: version 0/1 用 2 字节，version 2 用 4 字节
 
 调用链：
 
-- **上传**（`useWatermark.ts` → `addFiles`）：HEIC 时先 `file.arrayBuffer()` 存 `heicOriginalBuffer` → `extractExifFromHeic` 拿 TIFF → `parseExifFromTiff` 解析显示用 → 再 `heicToPng` 转 PNG 加载像素。最后 `finalExif = heicExif ?? exif`、`finalOriginalBuffer = heicOriginalBuffer ?? originalBuffer`。
+- **上传**（`useWatermark.ts` → `addFiles`）：HEIC 时先 `file.arrayBuffer()` 存 `heicOriginalBuffer` → `extractExifFromHeic` 拿 TIFF → `parseExifFromTiff` 解析显示用 → 再 `heicToJpg` 转高质量 JPEG 加载像素。最后 `finalExif = heicExif ?? exif`、`finalOriginalBuffer = heicOriginalBuffer ?? originalBuffer`。
 - **导出**（`HomeView.vue` → `exportWithLut.ts` → `exportComposedBlob`）：按格式写回 EXIF —— JPEG 走 `injectExifToJpeg`（APP1），PNG 走 `injectExifToPng`（eXIf chunk）。`originalBuffer` 是原始文件 buffer（JPEG 或 HEIC），内部统一经 `extractTiffFromBuffer` 拿到纯 TIFF 再包装。
 
 ## 已知限制

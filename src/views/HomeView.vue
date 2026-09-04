@@ -14,6 +14,8 @@ import {
   postToNative,
   makeOutputName,
   downloadBlob,
+  loadImageFromBlob,
+  releaseImage,
 } from '@/utils'
 import { exportComposedBlob } from '@/utils/exportWithLut'
 import { getLutData } from '@/constants/luts'
@@ -146,22 +148,33 @@ async function handleDownload(): Promise<void> {
     const lut = item.lutId ? getLutData(item.lutId) : null
     const intensity = lut ? item.lutIntensity / 100 : 0
 
-    const { blob, ext } = await exportComposedBlob({
-      img: item.img,
-      originalBuffer: item.originalBuffer,
-      lut,
-      intensity,
-      lutMode: item.lutMode,
-      watermarkImg: wmImg,
-      blendMode: wmParams.blendMode,
-      fitMode: wmParams.fitMode,
-      opacity: wmParams.opacity,
-      scale: wmParams.scale,
-      posX: wmParams.posX,
-      posY: wmParams.posY,
-      format: wmParams.format as ExportFormat,
-      quality: wmParams.quality / 100,
-    })
+    // 惰性解码：导出这一刻才把压缩源解码成全分辨率位图，用完立即释放
+    const fullImg = await loadImageFromBlob(item.pixelBlob)
+    let blob: Blob
+    let ext: string
+    try {
+      const result = await exportComposedBlob({
+        img: fullImg,
+        originalBuffer: item.originalBuffer,
+        lut,
+        intensity,
+        lutMode: item.lutMode,
+        watermarkImg: wmImg,
+        blendMode: wmParams.blendMode,
+        fitMode: wmParams.fitMode,
+        opacity: wmParams.opacity,
+        scale: wmParams.scale,
+        posX: wmParams.posX,
+        posY: wmParams.posY,
+        format: wmParams.format as ExportFormat,
+        quality: wmParams.quality / 100,
+      })
+      blob = result.blob
+      ext = result.ext
+    } finally {
+      // 释放 192MB 全分辨率位图，避免常驻
+      releaseImage(fullImg)
+    }
 
     const outName = makeOutputName(item.name, ext)
 
@@ -219,26 +232,32 @@ async function handleDownloadAll(): Promise<void> {
       const itemLut = item.lutId ? getLutData(item.lutId) : null
       const itemIntensity = itemLut ? item.lutIntensity / 100 : 0
 
-      const { blob, ext } = await exportComposedBlob({
-        img: item.img,
-        originalBuffer: item.originalBuffer,
-        lut: itemLut,
-        intensity: itemIntensity,
-        lutMode: item.lutMode,
-        watermarkImg: wmImg,
-        blendMode: wmParams.blendMode,
-        fitMode: wmParams.fitMode,
-        opacity: wmParams.opacity,
-        scale: wmParams.scale,
-        posX: wmParams.posX,
-        posY: wmParams.posY,
-        format: wmParams.format as ExportFormat,
-        quality: wmParams.quality / 100,
-      })
+      // 惰性解码：每张只在导出这一下解码，用完立即释放，避免 7×192MB 常驻
+      const fullImg = await loadImageFromBlob(item.pixelBlob)
+      try {
+        const result = await exportComposedBlob({
+          img: fullImg,
+          originalBuffer: item.originalBuffer,
+          lut: itemLut,
+          intensity: itemIntensity,
+          lutMode: item.lutMode,
+          watermarkImg: wmImg,
+          blendMode: wmParams.blendMode,
+          fitMode: wmParams.fitMode,
+          opacity: wmParams.opacity,
+          scale: wmParams.scale,
+          posX: wmParams.posX,
+          posY: wmParams.posY,
+          format: wmParams.format as ExportFormat,
+          quality: wmParams.quality / 100,
+        })
 
-      const outName = makeOutputName(item.name, ext)
-      zip.file(outName, blob)
+        zip.file(makeOutputName(item.name, result.ext), result.blob)
+      } finally {
+        releaseImage(fullImg)
+      }
 
+      // 让出主线程，给浏览器增量 GC 的机会，避免内存持续堆积
       await new Promise((r) => setTimeout(r, 0))
     }
 

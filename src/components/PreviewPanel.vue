@@ -73,34 +73,37 @@ function initRenderer(): void {
 
 /**
  * 渲染 LUT 到底图（离屏 WebGL）
- * 返回 WebGL canvas（包含 LUT 处理后的图；无 LUT 时返回原图）
+ * 返回 WebGL canvas（包含 LUT 处理后的图；无 LUT 时返回预览图）
+ * 注意：预览路径统一使用 previewImg（降采样版），节省内存
  */
 function renderLutToOffscreen(): HTMLCanvasElement | null {
   if (!props.currentImage) return null
-  const { img, width, height } = props.currentImage
+  const { previewImg } = props.currentImage
+  const pw = previewImg.width
+  const ph = previewImg.height
 
   const lut = getCurrentLut()
   const needLut = !!(lut && lutParams.lutId && lutParams.intensity > 0)
   downscaledNotice.value = false
 
-  // 无 LUT（或浓度 0）／WebGL 不可用 → 直接用原图
+  // 无 LUT（或浓度 0）／WebGL 不可用 → 直接用预览图
   // 注意：WebGL 不可用且选了 LUT 时也走这里，但顶部横幅会明确提示“LUT 未生效”，不静默
   if (!needLut || !lutRenderer || lutUnavailable.value) {
     const tmp = document.createElement('canvas')
-    tmp.width = width
-    tmp.height = height
+    tmp.width = pw
+    tmp.height = ph
     const ctx = tmp.getContext('2d')
-    if (ctx) ctx.drawImage(img, 0, 0)
+    if (ctx) ctx.drawImage(previewImg, 0, 0)
     return tmp
   }
 
   const intensity = lutParams.intensity / 100
-  lutRenderer.uploadImage(img)
+  lutRenderer.uploadImage(previewImg)
   lutRenderer.uploadLut(lut)
 
-  // P0-2：超 GPU 纹理上限时用安全尺寸渲染，回贴时由外层拉伸到原尺寸
-  const safe = lutRenderer.getSafeCanvasSize(width, height)
-  downscaledNotice.value = safe.width < width || safe.height < height
+  // P0-2：超 GPU 纹理上限时用安全尺寸渲染，回贴时由外层拉伸到预览尺寸
+  const safe = lutRenderer.getSafeCanvasSize(pw, ph)
+  downscaledNotice.value = safe.width < pw || safe.height < ph
   lutRenderer.render(safe.width, safe.height, intensity, lutParams.mode)
 
   return webglCanvas
@@ -117,18 +120,20 @@ function render(): void {
   showCanvas.value = true
 
   nextTick(() => {
-    const { width, height, img } = props.currentImage!
+    const { previewImg } = props.currentImage!
+    const pw = previewImg.width
+    const ph = previewImg.height
     const canvas = displayCanvasRef.value!
-    if (canvas.width !== width) canvas.width = width
-    if (canvas.height !== height) canvas.height = height
+    if (canvas.width !== pw) canvas.width = pw
+    if (canvas.height !== ph) canvas.height = ph
 
     const ctx = canvas.getContext('2d')
     if (!ctx) return
 
-    // 原图模式：直接画原图，跳过 LUT + 水印
+    // 原图模式：直接画预览原图，跳过 LUT + 水印
     if (showOriginal.value) {
-      ctx.clearRect(0, 0, width, height)
-      ctx.drawImage(img, 0, 0)
+      ctx.clearRect(0, 0, pw, ph)
+      ctx.drawImage(previewImg, 0, 0)
       emit('rendered')
       return
     }
@@ -137,16 +142,16 @@ function render(): void {
       initRenderer()
     }
 
-    // 1. LUT 底图（WebGL 离屏渲染；无 LUT 时为原图）
+    // 1. LUT 底图（WebGL 离屏渲染；无 LUT 时为预览图）
     const lutCanvas = renderLutToOffscreen()
     if (lutCanvas) {
       baseCanvas = lutCanvas
-      ctx.clearRect(0, 0, width, height)
-      ctx.drawImage(lutCanvas, 0, 0, width, height)
+      ctx.clearRect(0, 0, pw, ph)
+      ctx.drawImage(lutCanvas, 0, 0, pw, ph)
     }
 
     // 2. 叠加水印（Canvas2D 混合模式完全正确）
-    props.renderWatermark(ctx, width, height)
+    props.renderWatermark(ctx, pw, ph)
 
     emit('rendered')
   })
@@ -158,22 +163,24 @@ function render(): void {
 function refreshWatermark(): void {
   if (!props.currentImage || !displayCanvasRef.value || !showCanvas.value) return
 
-  const { width, height } = props.currentImage
+  const { previewImg } = props.currentImage
+  const pw = previewImg.width
+  const ph = previewImg.height
   const canvas = displayCanvasRef.value
   const ctx = canvas.getContext('2d')
   if (!ctx) return
 
-  // 底图：优先复用最近一次渲染出的底图（原图或 LUT 帧），
-  // 避免用从未绘制的空 webglCanvas 把原图盖掉（回归修复）
-  ctx.clearRect(0, 0, width, height)
+  // 底图：优先复用最近一次渲染出的底图（预览图或 LUT 帧），
+  // 避免用从未绘制的空 webglCanvas 把预览图盖掉（回归修复）
+  ctx.clearRect(0, 0, pw, ph)
   if (baseCanvas) {
-    ctx.drawImage(baseCanvas, 0, 0, width, height)
+    ctx.drawImage(baseCanvas, 0, 0, pw, ph)
   } else {
-    ctx.drawImage(props.currentImage.img, 0, 0)
+    ctx.drawImage(previewImg, 0, 0)
   }
 
   // 重画水印
-  props.renderWatermark(ctx, width, height)
+  props.renderWatermark(ctx, pw, ph)
 }
 
 /**

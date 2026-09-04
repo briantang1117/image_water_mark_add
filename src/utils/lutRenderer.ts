@@ -276,6 +276,10 @@ export class LutRenderer {
     // 这里我们用普通 RGBA，因为我们的 shader 自己管理伽马
     gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, src)
     this.assertNoGlError('图片纹理上传失败（可能超出 GPU 纹理上限）')
+    // 像素已同步拷入 GPU 纹理，CPU 侧 canvas 不再需要，主动释放 backing store
+    // （48MP 时这张 canvas ≈ 192MB，不释放会与后续 lutCanvas/outCanvas 峰值叠加）
+    src.width = 0
+    src.height = 0
     this.uploadedImageKey = img
   }
 

@@ -283,28 +283,41 @@ function copyStats(): void {
   if (diffMode.value === 'deltae') {
     lines.push(`最大 ΔE：${maxDeltaE.value.toFixed(3)}`)
     lines.push(`平均 ΔE：${avgDeltaE.value.toFixed(4)}`)
-    lines.push(`可察觉像素 (ΔE>1)：${jndPixels.value.toLocaleString()} (${((jndPixels.value / totalPixels.value) * 100).toFixed(2)}%)`)
-    lines.push(`明显差异像素 (ΔE>2)：${noticablePixels.value.toLocaleString()} (${((noticablePixels.value / totalPixels.value) * 100).toFixed(2)}%)`)
+    lines.push(
+      `可察觉像素 (ΔE>1)：${jndPixels.value.toLocaleString()} (${((jndPixels.value / totalPixels.value) * 100).toFixed(2)}%)`,
+    )
+    lines.push(
+      `明显差异像素 (ΔE>2)：${noticablePixels.value.toLocaleString()} (${((noticablePixels.value / totalPixels.value) * 100).toFixed(2)}%)`,
+    )
     lines.push('')
     lines.push('直方图（100 bins，从左到右 ΔE 从小到大）：')
     lines.push(histogram.value.join(', '))
   } else {
     lines.push(`最大差异：${maxDiff.value} / 255`)
     lines.push(`平均差异：${avgDiff.value.toFixed(4)} / 255`)
-    lines.push(`差异像素：${diffPixels.value.toLocaleString()} / ${totalPixels.value.toLocaleString()}`)
+    lines.push(
+      `差异像素：${diffPixels.value.toLocaleString()} / ${totalPixels.value.toLocaleString()}`,
+    )
     lines.push('')
     lines.push('直方图（100 bins，从左到右差值从小到大）：')
     lines.push(histogram.value.join(', '))
   }
 
   const text = lines.join('\n')
-  navigator.clipboard.writeText(text).then(() => {
-    copyStatus.value = '✅ 已复制'
-    setTimeout(() => { copyStatus.value = '' }, 2000)
-  }).catch(() => {
-    copyStatus.value = '❌ 复制失败'
-    setTimeout(() => { copyStatus.value = '' }, 2000)
-  })
+  navigator.clipboard
+    .writeText(text)
+    .then(() => {
+      copyStatus.value = '✅ 已复制'
+      setTimeout(() => {
+        copyStatus.value = ''
+      }, 2000)
+    })
+    .catch(() => {
+      copyStatus.value = '❌ 复制失败'
+      setTimeout(() => {
+        copyStatus.value = ''
+      }, 2000)
+    })
 }
 
 // ==================== 事件 ====================
@@ -343,9 +356,7 @@ function downloadDiff(): void {
 
 <template>
   <div class="diff-container">
-    <h2>
-      🔍 图片差分对比工具
-    </h2>
+    <h2>🔍 图片差分对比工具</h2>
 
     <!-- 上传区 -->
     <div class="upload-row">
@@ -372,11 +383,7 @@ function downloadDiff(): void {
         >
           🎨 ΔE 2000（感知色差）
         </button>
-        <button
-          class="mode-btn"
-          :class="{ active: diffMode === 'rgb' }"
-          @click="setMode('rgb')"
-        >
+        <button class="mode-btn" :class="{ active: diffMode === 'rgb' }" @click="setMode('rgb')">
           🔴 RGB 通道差
         </button>
       </div>
@@ -385,13 +392,7 @@ function downloadDiff(): void {
         <template v-if="diffMode === 'rgb'">
           <div class="slider-group">
             <span>放大：</span>
-            <input
-              type="range"
-              min="1"
-              max="100"
-              :value="amplify"
-              @input="handleAmplifyChange"
-            />
+            <input type="range" min="1" max="100" :value="amplify" @input="handleAmplifyChange" />
             <input
               type="number"
               min="1"
@@ -425,7 +426,7 @@ function downloadDiff(): void {
           </div>
         </template>
 
-        <button class="copy-btn" @click="copyStats" :disabled="!canCompute || sizeMismatch">
+        <button class="copy-btn" :disabled="!canCompute || sizeMismatch" @click="copyStats">
           📋 {{ copyStatus || '复制数据' }}
         </button>
         <button class="download-btn" @click="downloadDiff">💾 下载差异图</button>
@@ -436,9 +437,8 @@ function downloadDiff(): void {
     <div v-if="sizeMismatch" class="warning">
       ⚠️ 两张图片尺寸不一致，无法对比
       <br />
-      A: {{ imgA?.width }} × {{ imgA?.height }}
-      &nbsp;|&nbsp;
-      B: {{ imgB?.width }} × {{ imgB?.height }}
+      A: {{ imgA?.width }} × {{ imgA?.height }} &nbsp;|&nbsp; B: {{ imgB?.width }} ×
+      {{ imgB?.height }}
     </div>
 
     <!-- 统计信息 -->
@@ -508,17 +508,13 @@ function downloadDiff(): void {
       <div v-if="!canCompute || sizeMismatch" class="placeholder">
         请上传两张相同分辨率的图片进行对比
       </div>
-      <canvas
-        v-show="canCompute && !sizeMismatch"
-        ref="diffCanvasRef"
-        class="diff-canvas"
-      />
+      <canvas v-show="canCompute && !sizeMismatch" ref="diffCanvasRef" class="diff-canvas" />
     </div>
 
     <div class="hint">
       <template v-if="diffMode === 'deltae'">
-        💡 ΔE 2000 是感知色差的工业标准。ΔE &lt; 1 为「刚好可察觉差 (JND)」，ΔE &lt; 2 普通人眼基本看不出区别。
-        颜色从蓝（无差异）→ 青 → 绿 → 黄 → 红（最大差异）渐变。
+        💡 ΔE 2000 是感知色差的工业标准。ΔE &lt; 1 为「刚好可察觉差 (JND)」，ΔE &lt; 2
+        普通人眼基本看不出区别。 颜色从蓝（无差异）→ 青 → 绿 → 黄 → 红（最大差异）渐变。
       </template>
       <template v-else>
         💡 RGB 模式直接在 sRGB 编码空间做差。R/G/B 通道差异分别显示为红/绿/蓝色，黑色表示完全一致。

@@ -1,7 +1,9 @@
 <script setup lang="ts">
+import { computed } from 'vue'
 import type { ImageItem } from '@/types'
+import { MAX_IMAGES } from '@/constants'
 
-defineProps<{
+const props = defineProps<{
   imageList: ImageItem[]
   currentIndex: number
 }>()
@@ -9,21 +11,30 @@ defineProps<{
 const emit = defineEmits<{
   select: [index: number]
   remove: [index: number]
+  add: []
 }>()
+
+const isMax = computed(() => props.imageList.length >= MAX_IMAGES)
 
 function handleRemove(e: Event, index: number): void {
   e.stopPropagation()
   emit('remove', index)
 }
+
+function handleAdd(): void {
+  if (isMax.value) {
+    alert(`最多 ${MAX_IMAGES} 张图片`)
+    return
+  }
+  emit('add')
+}
 </script>
 
 <template>
   <div class="thumb-panel">
-    <div class="thumb-header">
-      <span class="thumb-title">图片列表</span>
-      <span class="thumb-count">{{ imageList.length }}</span>
+    <div v-if="imageList.length === 0" class="thumb-empty">
+      <button class="add-btn empty-add" @click="handleAdd">＋ 添加图片</button>
     </div>
-    <div v-if="imageList.length === 0" class="thumb-empty">暂无图片</div>
     <div v-else class="thumb-list">
       <div
         v-for="(item, index) in imageList"
@@ -35,6 +46,14 @@ function handleRemove(e: Event, index: number): void {
         <img :src="item.thumbDataURL" alt="" />
         <button class="thumb-remove" title="删除" @click="handleRemove($event, index)">×</button>
       </div>
+      <button
+        class="thumb-add-item"
+        :class="{ disabled: isMax }"
+        :title="isMax ? `最多 ${MAX_IMAGES} 张` : '添加图片'"
+        @click="handleAdd"
+      >
+        <span class="thumb-add-icon">＋</span>
+      </button>
     </div>
   </div>
 </template>
@@ -48,30 +67,10 @@ function handleRemove(e: Event, index: number): void {
   padding: 6px 10px;
 }
 
-.thumb-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  margin-bottom: 6px;
-}
-
-.thumb-title {
-  font-size: 12px;
-  color: #666;
-  font-weight: 500;
-}
-
-.thumb-count {
-  background: #007aff;
-  color: #fff;
-  border-radius: 10px;
-  padding: 1px 8px;
-  font-size: 11px;
-}
-
 .thumb-list {
   display: flex;
   flex-direction: row;
+  align-items: center;
   gap: 8px;
   overflow-x: auto;
   overflow-y: hidden;
@@ -146,10 +145,57 @@ function handleRemove(e: Event, index: number): void {
   background: #ff3b30;
 }
 
+/* 末尾「+」添加卡片 */
+.thumb-add-item {
+  flex-shrink: 0;
+  width: 60px;
+  height: 60px;
+  border-radius: 6px;
+  border: 2px dashed #ccc;
+  background: #fff;
+  color: #999;
+  font-size: 24px;
+  font-weight: 300;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.15s;
+}
+
+.thumb-add-item:hover:not(.disabled) {
+  border-color: #007aff;
+  color: #007aff;
+  background: #f0f7ff;
+}
+
+.thumb-add-item.disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.thumb-add-icon {
+  line-height: 1;
+  transform: translateY(-1px);
+}
+
+/* 空态添加按钮 */
 .thumb-empty {
   text-align: center;
-  color: #bbb;
-  font-size: 12px;
-  padding: 16px 0;
+  padding: 10px 0;
+}
+
+.add-btn.empty-add {
+  padding: 8px 20px;
+  background: #007aff;
+  color: #fff;
+  border: none;
+  border-radius: 8px;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.add-btn.empty-add:hover {
+  background: #0062cc;
 }
 </style>

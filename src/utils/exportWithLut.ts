@@ -42,7 +42,9 @@ export interface ExportOptions {
  * 渲染顺序：原图 → LUT 调色 → 水印叠加
  * 水印不参与 LUT 调色，保证水印颜色准确
  */
-export async function exportComposedBlob(opts: ExportOptions): Promise<{ blob: Blob; ext: string }> {
+export async function exportComposedBlob(
+  opts: ExportOptions,
+): Promise<{ blob: Blob; ext: string }> {
   const {
     img,
     originalBuffer,
@@ -69,7 +71,9 @@ export async function exportComposedBlob(opts: ExportOptions): Promise<{ blob: B
   if (lut && intensity > 0) {
     // P0-1：不允许“选了 LUT 却静默导出原图”——能力缺失时明确抛错，由调用方展示给用户
     if (!isWebGL2Supported()) {
-      throw new Error('LUT 调色需要 WebGL2，当前浏览器不支持；请使用新版浏览器，或先移除 LUT 再导出')
+      throw new Error(
+        'LUT 调色需要 WebGL2，当前浏览器不支持；请使用新版浏览器，或先移除 LUT 再导出',
+      )
     }
     const glCanvas = document.createElement('canvas')
     const renderer = new LutRenderer(glCanvas)

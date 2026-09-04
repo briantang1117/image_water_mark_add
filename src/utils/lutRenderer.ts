@@ -209,12 +209,7 @@ export class LutRenderer {
     // 位置(x,y) + UV(u,v)
     const vertices = new Float32Array([
       // x,    y,    u,   v
-      -1, -1, 0, 1,
-       1, -1, 1, 1,
-      -1,  1, 0, 0,
-      -1,  1, 0, 0,
-       1, -1, 1, 1,
-       1,  1, 1, 0,
+      -1, -1, 0, 1, 1, -1, 1, 1, -1, 1, 0, 0, -1, 1, 0, 0, 1, -1, 1, 1, 1, 1, 1, 0,
     ])
 
     const vbo = gl.createBuffer()
@@ -300,11 +295,7 @@ export class LutRenderer {
   private prepareUploadSource(
     src: HTMLImageElement | HTMLCanvasElement | ImageBitmap,
   ): HTMLCanvasElement {
-    const scale = Math.min(
-      1,
-      this.maxTextureSize / src.width,
-      this.maxTextureSize / src.height,
-    )
+    const scale = Math.min(1, this.maxTextureSize / src.width, this.maxTextureSize / src.height)
     const c = document.createElement('canvas')
     c.width = Math.max(1, Math.round(src.width * scale))
     c.height = Math.max(1, Math.round(src.height * scale))

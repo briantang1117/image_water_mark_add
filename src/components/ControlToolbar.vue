@@ -62,17 +62,9 @@ function handleWmChange(e: Event): void {
       </label>
       <label>
         水印：
-        <select
-          :value="wmKey"
-          :disabled="!hasCurrentImage"
-          @change="handleWmChange"
-        >
+        <select :value="wmKey" :disabled="!hasCurrentImage" @change="handleWmChange">
           <option value="">无水印</option>
-          <option
-            v-for="opt in currentBrandWatermarks"
-            :key="opt.value"
-            :value="opt.value"
-          >
+          <option v-for="opt in currentBrandWatermarks" :key="opt.value" :value="opt.value">
             {{ opt.label }}
           </option>
         </select>

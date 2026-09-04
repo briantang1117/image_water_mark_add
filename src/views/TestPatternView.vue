@@ -68,13 +68,13 @@ function drawPattern(): void {
   const rainbowH = halfH * 0.3
   const rainbowGrad = ctx.createLinearGradient(0, 0, W, 0)
   const stops = [
-    { pos: 0, r: 255, g: 0, b: 0 },    // 红
-    { pos: 1 / 6, r: 255, g: 255, b: 0 },  // 黄
-    { pos: 2 / 6, r: 0, g: 255, b: 0 },  // 绿
-    { pos: 3 / 6, r: 0, g: 255, b: 255 },  // 青
-    { pos: 4 / 6, r: 0, g: 0, b: 255 },  // 蓝
-    { pos: 5 / 6, r: 255, g: 0, b: 255 },  // 品红
-    { pos: 1, r: 255, g: 0, b: 0 },    // 红
+    { pos: 0, r: 255, g: 0, b: 0 }, // 红
+    { pos: 1 / 6, r: 255, g: 255, b: 0 }, // 黄
+    { pos: 2 / 6, r: 0, g: 255, b: 0 }, // 绿
+    { pos: 3 / 6, r: 0, g: 255, b: 255 }, // 青
+    { pos: 4 / 6, r: 0, g: 0, b: 255 }, // 蓝
+    { pos: 5 / 6, r: 255, g: 0, b: 255 }, // 品红
+    { pos: 1, r: 255, g: 0, b: 0 }, // 红
   ]
   for (const s of stops) {
     rainbowGrad.addColorStop(s.pos, `rgb(${s.r},${s.g},${s.b})`)
@@ -133,13 +133,33 @@ function drawPattern(): void {
   const cardY = satY + satH
   const colors = [
     // 高饱和
-    '#ff0000', '#00ff00', '#0000ff', '#ffff00', '#00ffff', '#ff00ff',
+    '#ff0000',
+    '#00ff00',
+    '#0000ff',
+    '#ffff00',
+    '#00ffff',
+    '#ff00ff',
     // 中饱和
-    '#cc3333', '#33cc33', '#3333cc', '#cccc33', '#33cccc', '#cc33cc',
+    '#cc3333',
+    '#33cc33',
+    '#3333cc',
+    '#cccc33',
+    '#33cccc',
+    '#cc33cc',
     // 低饱和/肤色
-    '#c89678', '#826a5a', '#c88484', '#6a8282', '#82a282', '#a282a2',
+    '#c89678',
+    '#826a5a',
+    '#c88484',
+    '#6a8282',
+    '#82a282',
+    '#a282a2',
     // 灰阶
-    '#ffffff', '#cccccc', '#999999', '#666666', '#333333', '#000000',
+    '#ffffff',
+    '#cccccc',
+    '#999999',
+    '#666666',
+    '#333333',
+    '#000000',
   ]
   const colorW = W / colors.length
   for (let i = 0; i < colors.length; i++) {
@@ -188,8 +208,8 @@ onMounted(drawPattern)
       <canvas ref="canvasRef" class="pattern-canvas" />
     </div>
     <p class="hint">
-      测试图包含：灰阶渐变 / 21级灰阶 / 暗部精细灰阶 / 亮部精细灰阶 / 色相渐变 /
-      RGB单通道渐变 / 饱和度渐变 / 24色卡 — 用于精准定位 LUT 色差来源。
+      测试图包含：灰阶渐变 / 21级灰阶 / 暗部精细灰阶 / 亮部精细灰阶 / 色相渐变 / RGB单通道渐变 /
+      饱和度渐变 / 24色卡 — 用于精准定位 LUT 色差来源。
     </p>
   </div>
 </template>

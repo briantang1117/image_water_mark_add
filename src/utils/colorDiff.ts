@@ -79,8 +79,8 @@ export function ciede2000(
   const C1p = Math.sqrt(a1p * a1p + b1 * b1)
   const C2p = Math.sqrt(a2p * a2p + b2 * b2)
 
-  const h1p = (b1 === 0 && a1p === 0) ? 0 : Math.atan2(b1, a1p)
-  const h2p = (b2 === 0 && a2p === 0) ? 0 : Math.atan2(b2, a2p)
+  const h1p = b1 === 0 && a1p === 0 ? 0 : Math.atan2(b1, a1p)
+  const h2p = b2 === 0 && a2p === 0 ? 0 : Math.atan2(b2, a2p)
 
   // Step 2: ΔL', ΔC', ΔH'
   const dLp = L2 - L1
@@ -120,7 +120,9 @@ export function ciede2000(
     0.32 * Math.cos(3 * hbarp + Math.PI / 30) -
     0.2 * Math.cos(4 * hbarp - (63 * Math.PI) / 180)
 
-  const dTheta = (30 * Math.PI / 180) * Math.exp(-Math.pow(((hbarp - (275 * Math.PI) / 180) / (25 * Math.PI / 180)), 2))
+  const dTheta =
+    ((30 * Math.PI) / 180) *
+    Math.exp(-Math.pow((hbarp - (275 * Math.PI) / 180) / ((25 * Math.PI) / 180), 2))
 
   const Cbarp7 = Math.pow(Cbarp, 7)
   const RC = 2 * Math.sqrt(Cbarp7 / (Cbarp7 + Math.pow(25, 7)))

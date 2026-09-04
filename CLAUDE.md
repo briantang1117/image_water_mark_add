@@ -26,15 +26,16 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ```
 src/
 ├── main.ts                  # 入口
-├── App.vue                  # 根组件（上下布局 + Tab 切换）
+├── App.vue                  # 根组件（路由出口 RouterView）
 ├── assets/
 │   ├── watermarks/          # 水印 PNG（相机/机型 × 横竖屏）
 │   └── luts/<分类>/*.cube   # 内置 LUT 配方（目录=分类，新增配方=加 .cube 文件）
 ├── components/
-│   ├── ControlToolbar.vue   # 水印控制面板（水印 Tab）
-│   ├── LutPanel.vue         # LUT 面板（LUT Tab：分类/配方/浓度/模式）
+│   ├── ControlToolbar.vue   # 水印控制面板（水印栏）
+│   ├── LutPanel.vue         # LUT 面板（调色栏：分类/配方/浓度/模式）
+│   ├── ExportPanel.vue      # 导出面板（导出栏：格式/质量/下载当前/全部 ZIP）
 │   ├── PreviewPanel.vue     # 预览画布（LUT 底图 + 水印合成 + WebGL2 能力横幅）
-│   └── ThumbPanel.vue       # 缩略图列表
+│   └── ThumbPanel.vue       # 缩略图列表（末尾「+」添加，最多 9 张硬上限）
 ├── composables/
 │   ├── useWatermark.ts      # 图片列表 + 水印参数/渲染/导出
 │   └── useLut.ts            # LUT 状态（每图独立 lutId/lutIntensity/lutMode）+ 分类切换
@@ -51,7 +52,7 @@ src/
 │   ├── exportWithLut.ts     # LUT+水印 合成导出 Blob（含 EXIF 回写）
 │   └── colorDiff.ts         # sRGB→Lab、CIEDE2000、伪彩（供 DiffView）
 └── views/
-    ├── HomeView.vue         # 主界面（预览 + 缩略图 + 水印/LUT Tab + 导出）
+    ├── HomeView.vue         # 主界面（上 50% 预览+缩略图；下 50% 三步工作区：调色/水印/导出）
     ├── DiffView.vue         # 双图 ΔE2000 差分对比工具
     └── TestPatternView.vue  # 色彩测试图生成器（LUT 校验用）
 ```

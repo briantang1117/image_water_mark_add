@@ -62,7 +62,7 @@ export function useLut() {
 
   const intensity = computed({
     get(): number {
-      return currentImage.value?.lutIntensity ?? 100
+      return currentImage.value?.lutIntensity ?? 50
     },
     set(val: number) {
       const img = currentImage.value
@@ -134,7 +134,7 @@ export function useLut() {
   }
 
   function resetParams(): void {
-    intensity.value = 100
+    intensity.value = 50
     mode.value = 'ps'
   }
 

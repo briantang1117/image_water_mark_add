@@ -81,11 +81,7 @@ function handleReset(): void {
           @change="handleLutChange"
         >
           <option value="">无 LUT</option>
-          <option
-            v-for="lut in currentCategoryLuts"
-            :key="lut.value"
-            :value="lut.value"
-          >
+          <option v-for="lut in currentCategoryLuts" :key="lut.value" :value="lut.value">
             {{ lut.label }}
           </option>
         </select>
@@ -141,8 +137,8 @@ function handleReset(): void {
         💡 sRGB 直查（默认）：直接对 sRGB 像素查表，同 Photoshop「颜色查找」，适合多数风格化配方。
       </template>
       <template v-else>
-        💡 Rec.709 还原：图像先重编码为 Rec.709 显示信号（BT.1886，γ≈2.4）再查表，
-        等价达芬奇「dlog → Rec.709 → 套 LUT」的结果，用于真 Rec.709 输入配方 / 709 视频帧素材。
+        💡 Rec.709 还原：图像先重编码为 Rec.709 显示信号（BT.1886，γ≈2.4）再查表， 等价达芬奇「dlog
+        → Rec.709 → 套 LUT」的结果，用于真 Rec.709 输入配方 / 709 视频帧素材。
       </template>
     </div>
 

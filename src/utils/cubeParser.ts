@@ -10,8 +10,8 @@ import type { Lut3D } from '@/types'
  * @param label 显示名称
  */
 export function parseCubeFile(text: string, id: string, label: string): Lut3D {
-  // 去掉 Windows 换行、BOM
-  const cleanText = text.replace(/\r\n/g, '\n').replace(/^﻿/, '')
+  // 去掉 Windows 换行、BOM（U+FEFF）
+  const cleanText = text.replace(/\r\n/g, '\n').replace(/^\uFEFF/, '')
   const lines = cleanText.split('\n')
 
   let size = 0
@@ -112,4 +112,3 @@ export async function parseCubeFileFromFile(file: File): Promise<Lut3D> {
   const baseName = file.name.replace(/\.cube$/i, '')
   return parseCubeFile(text, file.name, baseName)
 }
-

@@ -110,3 +110,6 @@ export const DEFAULT_PARAMS = {
   format: 'jpeg' as string,
   quality: 95,
 }
+
+// 缩略图列表硬上限（单一来源：ThumbPanel 与 useWatermark 均引用此常量）
+export const MAX_IMAGES = 9

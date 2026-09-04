@@ -8,7 +8,13 @@ import {
   loadImageFromFile,
   loadWatermark,
 } from '@/utils'
-import { DEFAULT_PARAMS, WATERMARK_SOURCES, BRANDS, DEFAULT_BRAND_KEY } from '@/constants'
+import {
+  DEFAULT_PARAMS,
+  WATERMARK_SOURCES,
+  BRANDS,
+  DEFAULT_BRAND_KEY,
+  MAX_IMAGES,
+} from '@/constants'
 
 // ==================== 全局单例状态 ====================
 
@@ -24,6 +30,7 @@ const params = reactive({ ...DEFAULT_PARAMS })
 
 const status = ref('')
 const progress = ref('')
+const error = ref('')
 
 let preloaded = false
 
@@ -94,11 +101,23 @@ async function addFiles(fileList: FileList | File[]): Promise<void> {
   const files = Array.from(fileList).filter((f) => f.type.startsWith('image/'))
   if (!files.length) return
 
-  status.value = `正在加载 ${files.length} 张图片...`
+  // 9 张硬上限：只取还能容纳的数量
+  const remaining = MAX_IMAGES - imageList.value.length
+  if (remaining <= 0) {
+    status.value = `最多 ${MAX_IMAGES} 张图片`
+    return
+  }
+  const accepted = files.slice(0, remaining)
+  const skipped = files.length - accepted.length
+  if (skipped > 0) {
+    console.warn(`已达到 ${MAX_IMAGES} 张上限，跳过 ${skipped} 张`)
+  }
+
+  status.value = `正在加载 ${accepted.length} 张图片...`
   progress.value = ''
 
   let loaded = 0
-  for (const file of files) {
+  for (const file of accepted) {
     try {
       const { img, thumbDataURL, name, width, height, exif, originalBuffer } =
         await loadImageFromFile(file)
@@ -116,11 +135,11 @@ async function addFiles(fileList: FileList | File[]): Promise<void> {
         originalBuffer,
         wmKey,
         lutId: '',
-        lutIntensity: 100,
+        lutIntensity: 50,
         lutMode: 'ps' as const,
       })
       loaded++
-      status.value = `正在加载... ${loaded}/${files.length}`
+      status.value = `正在加载... ${loaded}/${accepted.length}`
     } catch (e) {
       console.error('加载失败:', file.name, e)
     }
@@ -135,6 +154,10 @@ async function addFiles(fileList: FileList | File[]): Promise<void> {
 
 // 从 dataURL 添加一张图片
 async function addImageFromDataURL(dataURL: string, fileName: string): Promise<void> {
+  if (imageList.value.length >= MAX_IMAGES) {
+    status.value = `最多 ${MAX_IMAGES} 张图片`
+    return
+  }
   try {
     const { img, thumbDataURL, name, width, height, exif, originalBuffer } =
       await loadImageFromDataURL(dataURL, fileName)
@@ -152,7 +175,7 @@ async function addImageFromDataURL(dataURL: string, fileName: string): Promise<v
       originalBuffer,
       wmKey,
       lutId: '',
-      lutIntensity: 100,
+      lutIntensity: 50,
       lutMode: 'ps' as const,
     })
     if (currentIndex.value < 0) {
@@ -195,6 +218,7 @@ function clearList(): void {
   params.wmKey = ''
   status.value = ''
   progress.value = ''
+  error.value = ''
 }
 
 // 渲染到指定 canvas
@@ -329,6 +353,7 @@ export function useWatermark() {
     params,
     status,
     progress,
+    error,
     preloadWatermarks,
     addFiles,
     addImageFromDataURL,

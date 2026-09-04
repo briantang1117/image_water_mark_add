@@ -39,7 +39,7 @@ const sizeText = computed(() => {
   return `${width} × ${height} px (${mp}MP)`
 })
 
-// EXIF 显示条目
+// EXIF 显示条目（仅保留 品牌型号 / 时间 / GPS；导出 EXIF 回写仍为全量）
 const exifEntries = computed(() => {
   const exif = props.currentImage?.exif
   if (!exif) return []
@@ -50,14 +50,8 @@ const exifEntries = computed(() => {
       value: [exif.make, exif.model].filter(Boolean).join(' '),
     })
   }
-  if (exif.lens) entries.push({ label: '镜头', value: exif.lens })
-  const params = [exif.focalLength, exif.aperture, exif.shutterSpeed, exif.iso]
-    .filter(Boolean)
-    .join(' · ')
-  if (params) entries.push({ label: '参数', value: params })
-  if (exif.dateTime) entries.push({ label: '拍摄时间', value: exif.dateTime })
+  if (exif.dateTime) entries.push({ label: '时间', value: exif.dateTime })
   if (exif.gps) entries.push({ label: 'GPS', value: exif.gps })
-  if (exif.software) entries.push({ label: '软件', value: exif.software })
   return entries
 })
 
@@ -212,14 +206,11 @@ watch(
 )
 
 // LUT 参数变化 → 重渲 LUT + 水印
-watch(
-  [() => lutParams.lutId, () => lutParams.intensity, () => lutParams.mode],
-  () => {
-    if (showCanvas.value) {
-      requestAnimationFrame(refreshLut)
-    }
-  },
-)
+watch([() => lutParams.lutId, () => lutParams.intensity, () => lutParams.mode], () => {
+  if (showCanvas.value) {
+    requestAnimationFrame(refreshLut)
+  }
+})
 
 onMounted(() => {
   if (props.currentImage) {
@@ -273,24 +264,20 @@ defineExpose({
     </div>
 
     <div class="canvas-wrap">
-      <div v-if="!showCanvas" class="placeholder">请先选择图片</div>
+      <div v-if="!showCanvas" class="placeholder">上传图片</div>
       <div v-if="lutUnavailable && showCanvas" class="lut-warn">
         ⚠️ 当前浏览器不支持 WebGL2，LUT 调色不可用（下方为原图，带 LUT 导出已被阻止）
       </div>
       <div v-if="downscaledNotice && showCanvas" class="lut-warn">
         ⚠️ 图片超过 GPU 纹理上限，已降采样渲染（导出效果一致）
       </div>
-      <canvas
-        v-show="showCanvas"
-        ref="displayCanvasRef"
-        class="preview-canvas"
-      />
+      <canvas v-show="showCanvas" ref="displayCanvasRef" class="preview-canvas" />
       <button
         v-if="showCanvas"
         class="orig-toggle-btn"
         :class="{ active: showOriginal }"
-        @click="toggleOriginal"
         :title="showOriginal ? '显示效果' : '显示原图'"
+        @click="toggleOriginal"
       >
         {{ showOriginal ? '✨ 效果图' : '🖼 原图' }}
       </button>

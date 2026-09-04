@@ -78,10 +78,6 @@ export async function loadImageFromFile(file: File): Promise<{
   const isJpeg =
     file.type === 'image/jpeg' || file.type === 'image/jpg' || /\.jpe?g$/i.test(file.name)
   const originalBuffer = isJpeg ? arrayBuffer : undefined
-  console.log(
-    `[loadImageFromFile] ${file.name}: type=${file.type}, isJpeg=${isJpeg}, ` +
-      `buffer=${arrayBuffer.byteLength}, exif=${exif ? '有' : '无'}`,
-  )
 
   const dataURL = await new Promise<string>((resolve, reject) => {
     const reader = new FileReader()
@@ -293,6 +289,70 @@ function dmsToDecimal(value: number | number[]): number | null {
 }
 
 /**
+ * 从 TIFF 格式的 EXIF 数据中解析信息（exifr 原生支持 TIFF）
+ */
+export async function parseExifFromTiff(tiffBuffer: ArrayBuffer): Promise<ExifInfo | undefined> {
+  try {
+    const raw = await exifr.parse(tiffBuffer, [
+      'Make',
+      'Model',
+      'LensModel',
+      'LensMake',
+      'FocalLength',
+      'FNumber',
+      'ExposureTime',
+      'ISO',
+      'DateTimeOriginal',
+      'GPSLatitude',
+      'GPSLongitude',
+      'Software',
+    ])
+    if (!raw) return undefined
+    return buildExifInfo(raw)
+  } catch (err) {
+    console.error('[parseExifFromTiff] 解析失败:', err)
+    return undefined
+  }
+}
+
+/**
+ * 从 exifr 解析结果构建 ExifInfo 对象
+ */
+function buildExifInfo(raw: Record<string, unknown>): ExifInfo {
+  const info: ExifInfo = {}
+  if (raw.Make) info.make = String(raw.Make)
+  if (raw.Model) info.model = String(raw.Model)
+  if (raw.LensModel) info.lens = String(raw.LensModel)
+  else if (raw.LensMake) info.lens = String(raw.LensMake)
+
+  if (raw.FocalLength != null) info.focalLength = `${Math.round(raw.FocalLength as number)}mm`
+  if (raw.FNumber != null) info.aperture = `f/${raw.FNumber}`
+
+  if (raw.ExposureTime != null) {
+    const t = raw.ExposureTime as number
+    if (t >= 1) {
+      info.shutterSpeed = `${t}s`
+    } else {
+      info.shutterSpeed = `1/${Math.round(1 / t)}s`
+    }
+  }
+
+  if (raw.ISO != null) info.iso = `ISO ${raw.ISO}`
+  if (raw.DateTimeOriginal) info.dateTime = String(raw.DateTimeOriginal)
+  if (raw.Software) info.software = String(raw.Software)
+
+  if (raw.GPSLatitude != null && raw.GPSLongitude != null) {
+    const lat = dmsToDecimal(raw.GPSLatitude as number | number[])
+    const lng = dmsToDecimal(raw.GPSLongitude as number | number[])
+    if (lat != null && lng != null) {
+      info.gps = `${lat.toFixed(5)}, ${lng.toFixed(5)}`
+    }
+  }
+
+  return info
+}
+
+/**
  * 从文件 / dataURL 的 ArrayBuffer 中解析 EXIF 信息
  */
 export async function parseExif(buffer: ArrayBuffer): Promise<ExifInfo | undefined> {
@@ -313,38 +373,9 @@ export async function parseExif(buffer: ArrayBuffer): Promise<ExifInfo | undefin
     ])
     if (!raw) return undefined
 
-    const info: ExifInfo = {}
-    if (raw.Make) info.make = String(raw.Make)
-    if (raw.Model) info.model = String(raw.Model)
-    if (raw.LensModel) info.lens = String(raw.LensModel)
-    else if (raw.LensMake) info.lens = String(raw.LensMake)
-
-    if (raw.FocalLength != null) info.focalLength = `${Math.round(raw.FocalLength)}mm`
-    if (raw.FNumber != null) info.aperture = `f/${raw.FNumber}`
-
-    if (raw.ExposureTime != null) {
-      const t = raw.ExposureTime as number
-      if (t >= 1) {
-        info.shutterSpeed = `${t}s`
-      } else {
-        info.shutterSpeed = `1/${Math.round(1 / t)}s`
-      }
-    }
-
-    if (raw.ISO != null) info.iso = `ISO ${raw.ISO}`
-    if (raw.DateTimeOriginal) info.dateTime = String(raw.DateTimeOriginal)
-    if (raw.Software) info.software = String(raw.Software)
-
-    if (raw.GPSLatitude != null && raw.GPSLongitude != null) {
-      const lat = dmsToDecimal(raw.GPSLatitude as number | number[])
-      const lng = dmsToDecimal(raw.GPSLongitude as number | number[])
-      if (lat != null && lng != null) {
-        info.gps = `${lat.toFixed(5)}, ${lng.toFixed(5)}`
-      }
-    }
-
-    return info
-  } catch {
+    return buildExifInfo(raw)
+  } catch (err) {
+    console.error('[parseExif] 解析失败:', err)
     return undefined
   }
 }
@@ -371,7 +402,6 @@ function extractExifApp1(buffer: ArrayBuffer): Uint8Array | null {
   const view = new Uint8Array(buffer)
   // JPEG SOI: FF D8
   if (view.length < 4 || view[0] !== 0xff || view[1] !== 0xd8) {
-    console.warn('[extractExifApp1] 不是有效的 JPEG（无 SOI）')
     return null
   }
 
@@ -379,48 +409,23 @@ function extractExifApp1(buffer: ArrayBuffer): Uint8Array | null {
   let markerIndex = 0
   while (offset < view.length - 1) {
     // marker 必须以 FF 开头
-    if (view[offset] !== 0xff) {
-      console.warn(
-        `[extractExifApp1] marker 扫描中断: offset=${offset}, byte=0x${view[offset].toString(16)}`,
-      )
-      break
-    }
+    if (view[offset] !== 0xff) break
     const marker = view[offset + 1]
     const segLen = offset + 4 <= view.length ? (view[offset + 2] << 8) | view[offset + 3] : 0
     markerIndex++
 
-    console.log(
-      `[extractExifApp1] marker #${markerIndex}: 0x${marker.toString(16).padStart(2, '0')} ` +
-        `(FF ${marker.toString(16).padStart(2, '0')}) ` +
-        `offset=${offset}, len=${segLen}`,
-    )
-
     // APP1 marker: FF E1，且内容以 "Exif\0\0" 开头
     if (marker === 0xe1 && offset + 10 < view.length) {
-      // 检查 "Exif\0\0" 签名
       const sigBytes = view.slice(offset + 4, offset + 10)
       const sig = String.fromCharCode(...sigBytes)
-      console.log(
-        `[extractExifApp1] 找到 APP1，签名前6字节: `,
-        Array.from(sigBytes)
-          .map((b) => b.toString(16))
-          .join(' '),
-        `"${sig}"`,
-      )
       if (sig === 'Exif\0\0') {
         const app1Len = 2 + segLen
-        console.log(`[extractExifApp1] ✅ 匹配 Exif 签名，APP1 段长度=${app1Len}`)
         return new Uint8Array(buffer, offset, app1Len)
-      } else {
-        console.log(`[extractExifApp1] APP1 但非 Exif 签名，跳过`)
       }
     }
 
     // 跳到下一个 marker
-    if (offset + 4 > view.length) {
-      console.warn('[extractExifApp1] 数据不足，提前退出')
-      break
-    }
+    if (offset + 4 > view.length) break
     offset += 2 + segLen
 
     // 跳过填充字节：FF 00 是转义的 FF（在图像数据中），FF FF 也是填充
@@ -437,34 +442,236 @@ function extractExifApp1(buffer: ArrayBuffer): Uint8Array | null {
         break
       }
     }
-    // 调试：检查下一个位置是不是 FF
-    if (offset < view.length && view[offset] !== 0xff) {
-      console.warn(
-        `[extractExifApp1] ⚠️ offset=${offset} 处不是 FF（0x${view[offset].toString(16)}），` +
-          `可能已进入图像数据区`,
-      )
-    }
 
-    // 扫描到 SOS (FF DA) 或 DQT (FF DB) 等之后的图像数据段就停止
-    if (marker === 0xda || marker === 0xd9) {
-      console.log(`[extractExifApp1] 到达图像数据/EOI marker (0x${marker.toString(16)})，停止扫描`)
-      break
-    }
+    // 扫描到 SOS (FF DA) 或 EOI (FF D9) 就停止
+    if (marker === 0xda || marker === 0xd9) break
 
     // 安全限制：最多扫描 50 个 marker
-    if (markerIndex > 50) {
-      console.warn('[extractExifApp1] 扫描超过 50 个 marker，强制停止')
-      break
+    if (markerIndex > 50) break
+  }
+
+  return null
+}
+
+/**
+ * 从 HEIC/HEIF 文件中提取原始 EXIF TIFF 数据（不含 "Exif\0\0" 前缀）
+ * HEIC 基于 ISO BMFF，EXIF 存储在 meta box 的 iloc 中。
+ * 成功返回 Uint8Array（TIFF 原始数据），失败返回 null
+ */
+export function extractExifFromHeic(buffer: ArrayBuffer): Uint8Array | null {
+  const view = new DataView(buffer)
+  const bytes = new Uint8Array(buffer)
+
+  // 读取 box：4字节 size + 4字节 type
+  function readBox(off: number): { size: number; type: string; end: number } | null {
+    if (off + 8 > view.byteLength) return null
+    let size = view.getUint32(off)
+    const type = String.fromCharCode(bytes[off + 4], bytes[off + 5], bytes[off + 6], bytes[off + 7])
+    if (size === 1 && off + 16 <= view.byteLength) {
+      // 64-bit size
+      size = Number(view.getBigUint64(off + 8))
+    }
+    if (size < 8) return null
+    return { size, type, end: off + size }
+  }
+
+  // 递归查找 box 路径（返回目标 box 内容起始 offset，即 header 之后）
+  function findBox(off: number, end: number, path: string[]): number | null {
+    if (path.length === 0) return off
+    const target = path[0]
+    let pos = off
+    while (pos + 8 <= end) {
+      const box = readBox(pos)
+      if (!box) break
+      if (box.type === target) {
+        const result = findBox(pos + 8, box.end, path.slice(1))
+        if (result !== null) return result
+      }
+      pos = box.end
+      if (pos >= end) break
+    }
+    return null
+  }
+
+  // 标准 HEIC EXIF 位置：meta → iloc 中 itemId=Exif 的数据偏移
+  // 先找 meta box
+  const metaOffset = findBox(0, view.byteLength, ['meta'])
+  if (metaOffset === null) return null
+
+  // 读取 meta box 的完整范围
+  const metaBox = readBox(metaOffset - 8) // meta box 起点（包含 header）
+  if (!metaBox) return null
+  const metaEnd = metaBox.end
+
+  // meta box 内容开头有 version(1) + flags(3) = 4 字节，之后才是子 box
+  const metaContentStart = metaOffset + 4
+
+  // 先解析 iinf，找 type 为 "Exif" 的 item 拿到 itemId
+  let exifItemId: number | null = null
+  {
+    const iinfOff = findBox(metaContentStart, metaEnd, ['iinf'])
+    if (iinfOff !== null) {
+      // iinf header: version(1) + flags(3) + count(2)
+      const count = view.getUint16(iinfOff + 4)
+      let pos = iinfOff + 6
+      for (let i = 0; i < count; i++) {
+        // infe box
+        const infe = readBox(pos)
+        if (!infe) break
+        const infeContent = pos + 8
+        // infe version 0/1/2 用 16bit item_ID，version 3 用 32bit
+        const infeVersion = view.getUint8(infeContent)
+        const itemId =
+          infeVersion >= 3 ? view.getUint32(infeContent + 4) : view.getUint16(infeContent + 4)
+        // 扫内容找 "Exif" 字符串
+        const contentBytes = new Uint8Array(buffer, infeContent + 6, infe.end - infeContent - 6)
+        let found = false
+        for (let j = 0; j < contentBytes.length - 3; j++) {
+          if (
+            contentBytes[j] === 0x45 && // E
+            contentBytes[j + 1] === 0x78 && // x
+            contentBytes[j + 2] === 0x69 && // i
+            contentBytes[j + 3] === 0x66 // f
+          ) {
+            found = true
+            break
+          }
+        }
+        if (found) {
+          exifItemId = itemId
+          break
+        }
+        pos = infe.end
+      }
     }
   }
 
-  console.warn('[extractExifApp1] ❌ 未找到 Exif APP1 段')
+  if (exifItemId === null) return null
+
+  // 再解析 iloc 找到 itemId 对应的数据偏移和长度
+  {
+    const ilocOff = findBox(metaContentStart, metaEnd, ['iloc'])
+    if (ilocOff === null) return null
+
+    // iloc 结构（FullBox）：
+    //   version(1) + flags(3)
+    //   byte 0: offset_size(4bit) | length_size(4bit)
+    //   byte 1: base_offset_size(4bit) | (version==2 ? index_size : reserved)(4bit)
+    //   item_count(2字节 for v0/v1, 4字节 for v2)
+    const version = view.getUint8(ilocOff)
+    const sizeByte1 = view.getUint8(ilocOff + 4)
+    const sizeByte2 = view.getUint8(ilocOff + 5)
+    const offsetSize = (sizeByte1 >> 4) & 0xf
+    const lengthSize = sizeByte1 & 0xf
+    const baseOffsetSize = (sizeByte2 >> 4) & 0xf
+    const indexSize = version === 2 ? (sizeByte2 & 0xf) : 0
+
+    let pos = ilocOff + 6 // version(1)+flags(3)+sizeByte1(1)+sizeByte2(1) = 6 字节
+    const itemCount = version === 2 ? view.getUint32(pos) : view.getUint16(pos)
+    pos += version === 2 ? 4 : 2
+
+    for (let i = 0; i < itemCount; i++) {
+      const itemId = version === 2 ? view.getUint32(pos) : view.getUint16(pos)
+      pos += version === 2 ? 4 : 2
+      // version 1/2：item_ID 后有 construction_method（reserved 12bit + construction_method 4bit，共 2 字节）
+      // version 0 没有该字段
+      pos += version >= 1 ? 2 : 0
+      // data_reference_index (2 bytes)
+      pos += 2
+      // base_offset
+      let baseOffset = 0
+      if (baseOffsetSize === 4) baseOffset = view.getUint32(pos)
+      else if (baseOffsetSize === 8) baseOffset = Number(view.getBigUint64(pos))
+      pos += baseOffsetSize
+      const extentCount = view.getUint16(pos)
+      pos += 2
+
+      if (itemId === exifItemId) {
+        // 找到 EXIF item，读取第一个 extent
+        // extent_index (index_size, v2) + extent_offset (offset_size) + extent_length (length_size)
+        pos += indexSize
+        let extentOffset = 0
+        if (offsetSize === 4) extentOffset = view.getUint32(pos)
+        else if (offsetSize === 8) extentOffset = Number(view.getBigUint64(pos))
+        pos += offsetSize
+
+        let extentLength = 0
+        if (lengthSize === 4) extentLength = view.getUint32(pos)
+        else if (lengthSize === 8) extentLength = Number(view.getBigUint64(pos))
+
+        // 加上 baseOffset
+        extentOffset += baseOffset
+
+        // HEIC 的 EXIF 数据（ExifDataBlock）布局：
+        //   [4字节] exif_tiff_header_offset（相对"offset 字段之后"的偏移，通常=6="Exif\0\0"长度）
+        //   [6字节] "Exif\0\0"
+        //   [N字节] TIFF 数据（"II"/"MM" 开头）
+        if (extentOffset + 4 > view.byteLength) return null
+
+        const tiffOffset = view.getUint32(extentOffset)
+        const tiffStart = extentOffset + 4 + tiffOffset
+        const tiffLength = extentLength - 4 - tiffOffset
+
+        if (tiffStart + tiffLength > view.byteLength) return null
+        return new Uint8Array(buffer, tiffStart, tiffLength)
+      }
+
+      // 跳过所有 extents
+      for (let e = 0; e < extentCount; e++) {
+        pos += indexSize + offsetSize + lengthSize
+      }
+    }
+  }
+
+  return null
+}
+
+/**
+ * 将 TIFF 格式的 EXIF 数据包装成 JPEG APP1 (FF E1 + 长度 + Exif\0\0 + TIFF) 段
+ */
+function buildApp1FromTiff(tiffData: Uint8Array): Uint8Array {
+  const app1Len = 2 + 2 + 6 + tiffData.length // marker(2) + length(2) + "Exif\0\0"(6) + tiff
+  const app1 = new Uint8Array(app1Len)
+  app1[0] = 0xff
+  app1[1] = 0xe1
+  // length 字段含 2 字节 length 自身
+  const dataLen = 2 + 6 + tiffData.length // length字段(2) + Exif\0\0(6) + tiff
+  app1[2] = (dataLen >> 8) & 0xff
+  app1[3] = dataLen & 0xff
+  // "Exif\0\0"
+  app1[4] = 0x45 // E
+  app1[5] = 0x78 // x
+  app1[6] = 0x69 // i
+  app1[7] = 0x66 // f
+  app1[8] = 0x00
+  app1[9] = 0x00
+  // TIFF 数据
+  app1.set(tiffData, 10)
+  return app1
+}
+
+/**
+ * 从原始 buffer（JPEG 或 HEIC）中提取可注入 JPEG 的 APP1 段
+ * 失败返回 null
+ */
+function extractExifApp1FromBuffer(buffer: ArrayBuffer): Uint8Array | null {
+  const bytes = new Uint8Array(buffer)
+  // JPEG: FF D8 FF 开头
+  if (bytes.length >= 3 && bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff) {
+    return extractExifApp1(buffer)
+  }
+  // HEIC: ftyp box 开头（4字节size + "ftyp"）
+  if (bytes.length >= 8 && bytes[4] === 0x66 && bytes[5] === 0x74 && bytes[6] === 0x79 && bytes[7] === 0x70) {
+    const tiffData = extractExifFromHeic(buffer)
+    if (tiffData) return buildApp1FromTiff(tiffData)
+  }
   return null
 }
 
 /**
  * 将原始 EXIF (APP1 段) 注入到新的 JPEG Blob 中，返回新的 Blob
- * 仅对 JPEG 有效；非 JPEG 或无原始 EXIF 时返回原 blob
+ * 支持从 JPEG 或 HEIC 原始文件中提取 EXIF
+ * 仅对 JPEG 导出有效；非 JPEG 或无原始 EXIF 时返回原 blob
  *
  * 原理：新 JPEG 结构为 SOI (FF D8) + APP0 (JFIF) + ... + 图像数据
  * 我们在 SOI 之后插入 APP1 (EXIF) 段，然后拼接其余部分。
@@ -474,23 +681,16 @@ export function injectExifToJpeg(
   originalBuffer: ArrayBuffer | undefined,
 ): Promise<Blob> {
   return new Promise((resolve) => {
-    console.log(
-      `[injectExifToJpeg] 调用：新图大小=${newJpegBlob.size}, ` +
-        `原始buffer=${originalBuffer ? originalBuffer.byteLength : '无'}`,
-    )
     if (!originalBuffer) {
-      console.warn('[injectExifToJpeg] 无原始 buffer，跳过')
       resolve(newJpegBlob)
       return
     }
 
-    const app1 = extractExifApp1(originalBuffer)
+    const app1 = extractExifApp1FromBuffer(originalBuffer)
     if (!app1) {
-      console.warn('[injectExifToJpeg] 提取 APP1 失败，跳过')
       resolve(newJpegBlob)
       return
     }
-    console.log(`[injectExifToJpeg] 提取到 APP1，长度=${app1.length}`)
 
     const reader = new FileReader()
     reader.onload = () => {

@@ -1,5 +1,5 @@
 import { LutRenderer, isWebGL2Supported } from './lutRenderer'
-import { drawWatermark, injectExifToJpeg } from './index'
+import { drawWatermark, injectExifToJpeg, injectExifToPng } from './index'
 import type { Lut3D, LutMode } from '@/types'
 
 /**
@@ -137,10 +137,16 @@ export async function exportComposedBlob(
 
   const ext = format === 'png' ? 'png' : 'jpg'
 
-  // JPEG：写回 EXIF
-  if (format === 'jpeg' && originalBuffer) {
-    const finalBlob = await injectExifToJpeg(blob, originalBuffer)
-    return { blob: finalBlob, ext }
+  // 写回 EXIF：JPEG 走 APP1，PNG 走 eXIf chunk
+  if (originalBuffer) {
+    if (format === 'jpeg') {
+      const finalBlob = await injectExifToJpeg(blob, originalBuffer)
+      return { blob: finalBlob, ext }
+    }
+    if (format === 'png') {
+      const finalBlob = await injectExifToPng(blob, originalBuffer)
+      return { blob: finalBlob, ext }
+    }
   }
 
   return { blob, ext }

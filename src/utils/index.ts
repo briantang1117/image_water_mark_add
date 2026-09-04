@@ -651,20 +651,31 @@ function buildApp1FromTiff(tiffData: Uint8Array): Uint8Array {
 }
 
 /**
+ * 从原始 buffer（JPEG 或 HEIC）中提取纯 TIFF 格式的 EXIF 数据（II/MM 开头）
+ * 失败返回 null
+ */
+function extractTiffFromBuffer(buffer: ArrayBuffer): Uint8Array | null {
+  const bytes = new Uint8Array(buffer)
+  // JPEG: FF D8 FF 开头 → 剥掉 APP1 的 FF E1(2) + 长度(2) + "Exif\0\0"(6) 共 10 字节
+  if (bytes.length >= 3 && bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff) {
+    const app1 = extractExifApp1(buffer)
+    if (app1 && app1.length > 10) return app1.slice(10)
+    return null
+  }
+  // HEIC: ftyp box 开头（4字节size + "ftyp"）→ 提取的就是纯 TIFF
+  if (bytes.length >= 8 && bytes[4] === 0x66 && bytes[5] === 0x74 && bytes[6] === 0x79 && bytes[7] === 0x70) {
+    return extractExifFromHeic(buffer)
+  }
+  return null
+}
+
+/**
  * 从原始 buffer（JPEG 或 HEIC）中提取可注入 JPEG 的 APP1 段
  * 失败返回 null
  */
 function extractExifApp1FromBuffer(buffer: ArrayBuffer): Uint8Array | null {
-  const bytes = new Uint8Array(buffer)
-  // JPEG: FF D8 FF 开头
-  if (bytes.length >= 3 && bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff) {
-    return extractExifApp1(buffer)
-  }
-  // HEIC: ftyp box 开头（4字节size + "ftyp"）
-  if (bytes.length >= 8 && bytes[4] === 0x66 && bytes[5] === 0x74 && bytes[6] === 0x79 && bytes[7] === 0x70) {
-    const tiffData = extractExifFromHeic(buffer)
-    if (tiffData) return buildApp1FromTiff(tiffData)
-  }
+  const tiffData = extractTiffFromBuffer(buffer)
+  if (tiffData) return buildApp1FromTiff(tiffData)
   return null
 }
 
@@ -721,6 +732,105 @@ export function injectExifToJpeg(
     }
     reader.onerror = () => resolve(newJpegBlob)
     reader.readAsArrayBuffer(newJpegBlob)
+  })
+}
+
+/**
+ * PNG 标准 CRC-32（IEEE 802.3，反射多项式 0xEDB88320）
+ * 计算范围：type 码 + data（不含 length 与 CRC 自身）
+ */
+function crc32(bytes: Uint8Array): number {
+  let crc = 0xffffffff
+  for (let i = 0; i < bytes.length; i++) {
+    crc ^= bytes[i]
+    for (let j = 0; j < 8; j++) {
+      crc = (crc >>> 1) ^ (0xedb88320 & -(crc & 1))
+    }
+  }
+  return (crc ^ 0xffffffff) >>> 0
+}
+
+/**
+ * 将纯 TIFF 数据包装成 PNG eXIf chunk（length + "eXIf" + TIFF + CRC）
+ */
+function buildExifChunk(tiffData: Uint8Array): Uint8Array {
+  // length(4) + type(4) + data + crc(4)
+  const chunk = new Uint8Array(12 + tiffData.length)
+  const len = tiffData.length
+  chunk[0] = (len >>> 24) & 0xff
+  chunk[1] = (len >>> 16) & 0xff
+  chunk[2] = (len >>> 8) & 0xff
+  chunk[3] = len & 0xff
+  // type: "eXIf"
+  chunk[4] = 0x65
+  chunk[5] = 0x58
+  chunk[6] = 0x49
+  chunk[7] = 0x66
+  chunk.set(tiffData, 8)
+
+  // CRC 计算范围是 type + data（chunk[4] 起）
+  const crc = crc32(chunk.subarray(4, 8 + tiffData.length))
+  const crcOffset = 8 + tiffData.length
+  chunk[crcOffset] = (crc >>> 24) & 0xff
+  chunk[crcOffset + 1] = (crc >>> 16) & 0xff
+  chunk[crcOffset + 2] = (crc >>> 8) & 0xff
+  chunk[crcOffset + 3] = crc & 0xff
+  return chunk
+}
+
+/**
+ * 将原始 EXIF 以 eXIf chunk 的形式注入到 PNG Blob 中，返回新的 Blob
+ * 支持从 JPEG 或 HEIC 原始文件中提取 EXIF
+ * 无原始 EXIF 或非 PNG 时返回原 blob
+ *
+ * 原理：PNG 结构为 签名(8) + IHDR + IDAT + IEND。
+ * eXIf 是 ancillary chunk，必须在 IDAT 之前，故插在 IHDR 之后。
+ */
+export function injectExifToPng(
+  newPngBlob: Blob,
+  originalBuffer: ArrayBuffer | undefined,
+): Promise<Blob> {
+  return new Promise((resolve) => {
+    if (!originalBuffer) {
+      resolve(newPngBlob)
+      return
+    }
+
+    const tiffData = extractTiffFromBuffer(originalBuffer)
+    if (!tiffData) {
+      resolve(newPngBlob)
+      return
+    }
+
+    const exifChunk = buildExifChunk(tiffData)
+
+    const reader = new FileReader()
+    reader.onload = () => {
+      const newBytes = new Uint8Array(reader.result as ArrayBuffer)
+      // PNG 签名：89 50 4E 47 0D 0A 1A 0A
+      const PNG_SIGN = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]
+      if (newBytes.length < 8 + 8 || !PNG_SIGN.every((b, i) => newBytes[i] === b)) {
+        resolve(newPngBlob)
+        return
+      }
+
+      // 定位首个 chunk（IHDR）的结束位置：签名(8) + length(4) + type(4) + data + crc(4)
+      const ihdrLen =
+        ((newBytes[8] << 24) | (newBytes[9] << 16) | (newBytes[10] << 8) | newBytes[11]) >>> 0
+      const insertAt = 8 + 4 + 4 + ihdrLen + 4 // 签名 + length + type + data + crc
+
+      // 组装：签名 + IHDR + eXIf + 剩余（IDAT/IEND...）
+      const before = newBytes.slice(0, insertAt)
+      const after = newBytes.slice(insertAt)
+      const result = new Uint8Array(before.length + exifChunk.length + after.length)
+      result.set(before, 0)
+      result.set(exifChunk, before.length)
+      result.set(after, before.length + exifChunk.length)
+
+      resolve(new Blob([result], { type: 'image/png' }))
+    }
+    reader.onerror = () => resolve(newPngBlob)
+    reader.readAsArrayBuffer(newPngBlob)
   })
 }
 
